@@ -1,0 +1,30 @@
+{% extends "shell.html" %}
+{% block content %}
+<div class="page-heading"><h1>{{ heading }}</h1><a class="button secondary" href="/media-proposals">返回媒体提案</a></div>
+<section class="panel settings-panel" aria-labelledby="profile-current">
+  <header class="settings-panel-header"><h2 id="profile-current">当前登录账号</h2></header>
+  <div class="profile-identity">
+    <span class="account-avatar" data-account-avatar aria-hidden="true">
+      <span data-account-initial>{{ user.initial() }}</span>
+      {% if let Some(avatar) = user.avatar %}<img src="{{ avatar.as_str() }}" alt="" referrerpolicy="no-referrer">{% endif %}
+    </span>
+    <div><strong>{{ user.display }}</strong><p>{{ user.method_label() }}</p>
+      {% if let Some(id) = user.feishu_id() %}<p>飞书 Open ID {{ id }}</p>{% endif %}
+    </div>
+    <form class="profile-exit" method="post" action="/demo/sign-out">
+      <button class="logout-button" type="submit" aria-label="退出登录" title="退出登录">{% include "logout-icon.html" %}</button>
+    </form>
+  </div>
+</section>
+<section class="panel settings-panel" aria-labelledby="profile-theme">
+  <header class="settings-panel-header">
+    <div><h2 id="profile-theme">页面主题</h2><p>主题偏好保存在当前浏览器。</p></div>
+  </header>
+  <fieldset class="theme-options" data-theme-options disabled>
+    <legend class="visually-hidden">选择主题</legend>
+    <label><input type="radio" name="theme" value="system" checked>跟随系统</label>
+    <label><input type="radio" name="theme" value="light">浅色</label>
+    <label><input type="radio" name="theme" value="dark">深色</label>
+  </fieldset>
+</section>
+{% endblock %}

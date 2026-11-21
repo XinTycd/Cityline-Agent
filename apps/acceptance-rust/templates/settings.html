@@ -1,0 +1,156 @@
+{% extends "shell.html" %}
+{% block content %}
+<header class="page-heading">
+  <div><h1>{{ heading }}</h1><p>管理工作台的品牌、登录方式和平台授权。</p></div>
+</header>
+<nav class="page-tabs" aria-label="系统设置分类">
+  <a href="/settings"{% if tab == "brand" %} aria-current="page"{% endif %}>品牌外观</a>
+  <a href="/settings?tab=login"{% if tab == "login" %} aria-current="page"{% endif %}>登录与安全</a>
+  <a href="/settings?tab=platforms"{% if tab == "platforms" %} aria-current="page"{% endif %}>平台授权</a>
+</nav>
+{% if tab == "brand" %}
+<section class="panel settings-panel" aria-labelledby="brand-settings">
+  <header class="settings-panel-header">
+    <div><h2 id="brand-settings">品牌外观</h2><p>编辑工作台侧栏显示的品牌信息。</p></div>
+  </header>
+  <form method="post" action="/settings/brand" enctype="multipart/form-data" class="settings-form" data-workspace-submit>
+    <div class="settings-rows">
+      <div class="settings-field">
+        <label for="site-name">站点名称</label>
+        <input id="site-name" type="text" name="name" value="{{ brand.name }}" maxlength="24" required>
+      </div>
+      <div class="settings-field">
+        <label for="site-description">站点简介</label>
+        <input id="site-description" type="text" name="description" value="{{ brand.description }}" maxlength="80" required>
+      </div>
+      <div class="settings-field">
+        <label for="site-logo">品牌 Logo</label>
+        <div class="settings-logo">
+          <div class="settings-logo-preview"><img src="{% if brand.logo.is_some() %}/assets/site-logo.png{% else %}/assets/cityline.svg{% endif %}" width="36" height="36" alt="当前品牌图标"></div>
+          <div class="settings-control">
+            <input id="site-logo" type="file" name="logo" accept="image/png" aria-describedby="site-logo-help">
+            <small id="site-logo-help">PNG，最大 512 × 512 像素，192 KiB。</small>
+            {% if brand.logo.is_some() %}<label class="media-confirm"><input type="checkbox" name="reset_logo" value="yes">恢复默认图标</label>{% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+    {% if saved %}<p class="form-feedback" role="status" data-tone="success">品牌设置已保存。</p>{% endif %}
+    <div class="form-actions"><button type="submit">保存品牌设置</button></div>
+  </form>
+</section>
+{% else if tab == "login" %}
+<section class="panel settings-panel" aria-labelledby="login-settings">
+  <header class="settings-panel-header">
+    <div><h2 id="login-settings">登录与安全</h2><p>设置登录方式、会话有效期和本地管理员账号。</p></div>
+    {% if login.enabled() %}<span class="badge" data-tone="success">登录已开启</span>
+    {% else %}<span class="badge" data-tone="neutral">演示模式</span>{% endif %}
+  </header>
+  <form method="post" action="/settings/login" class="settings-form" data-login-settings>
+    <div class="settings-rows">
+      <div class="settings-field">
+        <span>登录验证</span>
+        <label class="media-confirm"><input type="checkbox" name="enabled" value="yes" aria-describedby="login-mode-help"{% if login.enabled() %} checked{% endif %}>要求用户登录</label>
+      </div>
+      <p class="settings-help" id="login-mode-help">关闭时使用演示账号访问工作台。</p>
+      <div class="settings-rows" data-auth-fields>
+        <fieldset class="settings-group">
+          <legend>访问方式</legend>
+          <div class="settings-rows">
+            <div class="settings-field">
+              <label for="login-provider">登录方式</label>
+              <select id="login-provider" name="mode" data-auth-mode>
+                <option value="local"{% if login.mode.key() == "local" %} selected{% endif %}>本地登录</option>
+                <option value="oidc"{% if login.mode.key() == "oidc" %} selected{% endif %}>OIDC 接入</option>
+                <option value="feishu"{% if login.mode.key() == "feishu" %} selected{% endif %}>飞书接入</option>
+              </select>
+            </div>
+            <div class="settings-field">
+              <label for="login-session">会话时长</label>
+              <div class="settings-control settings-number"><input id="login-session" type="number" name="session_minutes" value="{{ login.session_minutes }}" min="5" max="720" required><span>分钟</span></div>
+            </div>
+          </div>
+        </fieldset>
+        <fieldset class="settings-group" data-auth-provider="external">
+          <legend>外部认证</legend>
+          <div class="settings-rows">
+            <div class="settings-field" data-auth-provider="oidc">
+              <label for="oidc-issuer">OIDC Issuer</label>
+              <input id="oidc-issuer" type="url" name="issuer" value="{{ login.issuer }}" maxlength="280">
+            </div>
+            <div class="settings-field" data-auth-provider="oidc">
+              <label for="oidc-client-id">OIDC Client ID</label>
+              <input id="oidc-client-id" type="text" name="client_id" value="{{ login.client_id }}" maxlength="160">
+            </div>
+            <div class="settings-field" data-auth-provider="feishu">
+              <label for="feishu-app-id">飞书 App ID</label>
+              <input id="feishu-app-id" type="text" name="feishu_app_id" value="{{ login.feishu_app_id }}" maxlength="100">
+            </div>
+            <div class="settings-field">
+              <label for="provider-timeout">认证超时</label>
+              <div class="settings-control settings-number"><input id="provider-timeout" type="number" name="provider_timeout" value="{{ login.provider_timeout }}" min="15" max="300" required><span>秒</span></div>
+            </div>
+            <div class="settings-field">
+              <label for="login-callback">回调地址</label>
+              <input id="login-callback" type="url" value="{{ callback_url }}" readonly>
+            </div>
+            <p class="settings-help">外部应用凭据和允许登录的用户由服务端配置。</p>
+          </div>
+        </fieldset>
+        <fieldset class="settings-group">
+          <legend>本地管理员</legend>
+          <div class="settings-rows">
+            <div class="settings-field">
+              <label for="login-admin">管理员账号</label>
+              <input id="login-admin" type="text" name="username" value="{{ login.username }}" maxlength="48" autocomplete="username">
+            </div>
+            <div class="settings-field">
+              <label for="login-password">管理员密码</label>
+              <div class="settings-control">
+                <input id="login-password" type="password" name="password" autocomplete="new-password" maxlength="128" aria-describedby="login-password-help">
+                <small id="login-password-help">首次启用时设置，至少 12 个字符。</small>
+              </div>
+            </div>
+          </div>
+        </fieldset>
+      </div>
+    </div>
+    {% if saved %}<p class="form-feedback" role="status" data-tone="success">登录设置已保存。</p>{% endif %}
+    <div class="form-actions"><p>保存后，现有登录会话将失效。</p><button type="submit">保存登录设置</button></div>
+  </form>
+</section>
+{% else %}
+<section class="panel settings-panel" aria-labelledby="redbean-settings">
+  <header class="settings-panel-header">
+    <div><h2 id="redbean-settings">红豆库存授权</h2><p>用于查询公交和地铁广告的档期库存。</p></div>
+    {% if redbean_authorized %}<span class="badge" data-tone="success">已授权</span>
+    {% else if redbean_configured %}<span class="badge" data-tone="warning">待授权</span>
+    {% else %}<span class="badge" data-tone="neutral">服务端未配置</span>{% endif %}
+  </header>
+  {% if redbean_configured %}
+  {% if redbean_authorized %}
+  <form method="post" action="/settings/redbean/clear" class="settings-form" data-workspace-submit>
+    <p>临时授权有效期间，后续任务可直接查询红豆库存。新云平台单独认证。</p>
+    <div class="form-actions"><button type="submit" class="secondary">清除本地授权</button></div>
+  </form>
+  {% else %}
+  <form method="post" action="/settings/redbean" class="settings-form" data-workspace-submit data-redbean-credentials>
+    <div class="settings-rows">
+      <div class="settings-field">
+        <label for="redbean-user">红豆平台账号</label>
+        <input id="redbean-user" type="text" name="username" maxlength="80" autocomplete="off" required>
+      </div>
+      <div class="settings-field">
+        <label for="redbean-password">红豆平台密码</label>
+        <input id="redbean-password" type="password" name="password" maxlength="128" autocomplete="off" required>
+      </div>
+    </div>
+    <div class="form-actions"><button type="submit">授权红豆库存</button></div>
+  </form>
+  {% endif %}
+  {% else %}
+  <p class="settings-message">服务端配置客户端凭据后，可在此授权。也可在提案任务打开的红豆官方页面完成认证。</p>
+  {% endif %}
+</section>
+{% endif %}
+{% endblock %}

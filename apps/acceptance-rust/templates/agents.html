@@ -1,0 +1,98 @@
+{% extends "shell.html" %}
+{% block content %}
+<header class="page-heading">
+  <div><h1>{{ heading }}</h1><p>管理提案所用的模型与 Agent 协作方式。</p></div>
+</header>
+<nav class="page-tabs" aria-label="Agent 配置分类">
+  <a href="/agents"{% if tab == "model" %} aria-current="page"{% endif %}>模型接入</a>
+  <a href="/agents?tab=collaboration"{% if tab == "collaboration" %} aria-current="page"{% endif %}>协作策略</a>
+</nav>
+{% if tab == "model" %}
+<section class="panel settings-panel" aria-labelledby="agent-model-title">
+  <header class="settings-panel-header">
+    <div><h2 id="agent-model-title">模型接入</h2><p>选择提案任务使用的模型来源。</p></div>
+    {% if configured %}<span class="badge" data-tone="success">已配置模型</span>
+    {% else %}<span class="badge" data-tone="neutral">使用本地规则</span>{% endif %}
+  </header>
+  <form action="/agents/model" method="post" class="settings-form" id="agent-model-form" data-workspace-submit data-agent-model{% if environment_configured %} data-agent-environment-configured{% endif %}>
+    <div class="settings-rows">
+      <div class="settings-field">
+        <label for="agent-model-mode">模型来源</label>
+        <select id="agent-model-mode" name="mode">
+          <option value="environment"{% if mode == "environment" %} selected{% endif %}>使用服务端配置</option>
+          <option value="cloud"{% if mode == "cloud" %} selected{% endif %}>指定云端模型</option>
+          <option value="local"{% if mode == "local" %} selected{% endif %}>指定本地模型</option>
+          <option value="rules"{% if mode == "rules" %} selected{% endif %}>仅使用本地规则</option>
+        </select>
+      </div>
+      <div class="settings-rows" data-agent-model-fields>
+        <div class="settings-field">
+          <label for="agent-model-endpoint">模型接口地址</label>
+          <div class="settings-control">
+            <input id="agent-model-endpoint" type="url" name="endpoint" value="{{ endpoint }}" placeholder="https://model.example.invalid/" maxlength="500" aria-describedby="agent-model-endpoint-help">
+            <small id="agent-model-endpoint-help">填写 Chat Completions 接口。云端接口使用 HTTPS，本地模型使用回环地址。</small>
+          </div>
+        </div>
+        <div class="settings-field">
+          <label for="agent-model-name">模型名称</label>
+          <input id="agent-model-name" type="text" name="name" value="{{ name }}" maxlength="128">
+        </div>
+      </div>
+      {% if can_save_key %}
+      <div class="settings-field" data-agent-key-field>
+        <label for="agent-model-key">API Key</label>
+        <div class="settings-control">
+          <input id="agent-model-key" type="password" name="api_key" autocomplete="new-password" spellcheck="false" maxlength="1024" aria-describedby="agent-model-key-help">
+          <small id="agent-model-key-help">{% if key_saved %}当前配置已保存密钥。{% endif %}同一接口地址留空时沿用现有密钥。本地模型可按需填写。</small>
+        </div>
+      </div>
+      {% endif %}
+      <p class="settings-help" data-agent-environment-note hidden>{% if environment_configured %}保存后将使用服务端配置的接口与模型。{% else %}服务端尚未配置模型，提案将使用本地规则。{% endif %}</p>
+    </div>
+    {% if key_unreadable %}<p class="form-feedback" role="alert" data-tone="error">无法读取已保存的 API Key，请重新填写。</p>{% endif %}
+    {% if saved %}<p class="form-feedback" role="status" data-tone="success">模型配置已保存。</p>{% endif %}
+  </form>
+  {% if let Some(passed) = probe %}
+    {% if passed %}<p class="form-feedback" role="status" data-tone="success">模型连接成功，返回结果已通过格式校验。</p>
+    {% else %}<p class="form-feedback" role="status" data-tone="error">模型连接测试未通过。<a href="/audit?category=Agent&amp;q=连接测试">查看测试日志</a></p>{% endif %}
+  {% endif %}
+  <div class="form-actions">
+    {% if configured %}
+    <form action="/agents/probe" method="post" data-workspace-submit aria-label="测试已保存的模型配置">
+      <button type="submit" class="secondary">测试连接</button>
+    </form>
+    {% endif %}
+    <button type="submit" form="agent-model-form">保存模型配置</button>
+  </div>
+</section>
+{% else %}
+<section class="panel settings-panel" aria-labelledby="agent-collaboration-title">
+  <header class="settings-panel-header">
+    <div><h2 id="agent-collaboration-title">协作策略</h2><p>选择模型参与提案的阶段。</p></div>
+  </header>
+  <form action="/agents/collaboration" method="post" class="settings-form" data-workspace-submit>
+    <fieldset class="settings-choice-group">
+      <legend class="visually-hidden">提案执行方式</legend>
+      <label>
+        <input type="radio" name="collaboration" value="coordinated"{% if collaboration == "coordinated" %} checked{% endif %}>
+        <span><strong>多 Agent 协作</strong><small>策略、组合和核验依次协作，库存与报价由工作台核算。</small></span>
+      </label>
+      <label>
+        <input type="radio" name="collaboration" value="strategy_only"{% if collaboration == "strategy_only" %} checked{% endif %}>
+        <span><strong>仅策略使用 Agent</strong><small>Agent 给出投放方向，工作台按规则完成组合和交付。</small></span>
+      </label>
+    </fieldset>
+    {% if saved %}<p class="form-feedback" role="status" data-tone="success">协作策略已保存。</p>{% endif %}
+    <div class="form-actions"><button type="submit">保存协作策略</button></div>
+  </form>
+</section>
+<section class="panel settings-panel" aria-labelledby="agent-workflow-title">
+  <header class="settings-panel-header"><h2 id="agent-workflow-title">Agent 职责</h2></header>
+  <dl class="settings-roles">
+    <div><dt>提案策略</dt><dd>根据客户需求选择到访、通勤或认知方向，优先使用已确认的目标。</dd></div>
+    <div><dt>媒介组合</dt><dd>结合策略、库存、刊例和必选条件，确定 A／B 方案的核算顺序。</dd></div>
+    <div><dt>报告核验</dt><dd>汇总校验结果和待复核事项，提交人工确认。</dd></div>
+  </dl>
+</section>
+{% endif %}
+{% endblock %}

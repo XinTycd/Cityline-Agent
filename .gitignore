@@ -1,0 +1,14 @@
+/apps/acceptance-rust/target/
+/.operations-data/
+.env*
+!.env.example
+/node_modules/
+/.cityline-private/
+/output/
+/系统风格易拉宝.py
+/展示版易拉宝.py
+/scripts/make-rollup.py
+/城线-系统风格易拉宝*.png
+/城线-系统风格易拉宝.pdf
+/城线-讲解展示版*.png
+/城线-讲解展示版.pdf

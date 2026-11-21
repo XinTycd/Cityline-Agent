@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>登录 · 城线</title>
+  <link rel="stylesheet" href="/assets/workbench.css">
+  <link rel="icon" href="/assets/site-logo.png">
+</head>
+<body class="signed-out">
+  <main>
+  <section class="panel sign-in-panel" aria-labelledby="sign-in-title">
+    <header class="profile-identity">
+      <img class="sign-in-logo" src="/assets/site-logo.png" width="42" height="42" alt="">
+      <div><h1 id="sign-in-title">登录工作台</h1><p>{{ crate::settings::DEFAULT_DESCRIPTION }}</p></div>
+    </header>
+    {% if let Some(message) = notice %}<p class="form-feedback" data-tone="error" role="alert">{{ message }}</p>{% endif %}
+    {% if mode.external() %}
+      <a class="button" href="/auth/start">{% if mode.key() == "oidc" %}通过企业 OIDC 登录{% else %}使用飞书登录{% endif %}</a>
+      <details><summary>本地管理员登录</summary>
+    {% endif %}
+    <form method="post" action="/demo/sign-in">
+      <label>账号<input name="username" type="text" autocomplete="username" maxlength="48" required></label>
+      <label>密码<input name="password" type="password" autocomplete="current-password" maxlength="128" required></label>
+      <button type="submit"{% if mode.external() %} class="secondary"{% endif %}>本地登录</button>
+    </form>
+    {% if mode.external() %}</details>{% endif %}
+  </section>
+  </main>
+</body>
+</html>

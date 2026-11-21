@@ -1,0 +1,12 @@
+<dl class="report-guidance">
+  <div><dt>客户与品牌</dt><dd>{% if campaign.brief.customer_profile.is_empty() %}上海有线下门店的连锁食品饮料品牌，规模待确认。{% else %}{{ campaign.brief.customer_profile }}{% endif %}</dd></div>
+  <div><dt>生意目标</dt><dd>{% if campaign.brief.objective.is_empty() %}展示假设 · 提高目标门店的试饮参与。{% else %}{{ campaign.brief.objective }}{% endif %}</dd></div>
+  <div><dt>Campaign 主目标</dt><dd>{% if !campaign.brief.campaign_goal.is_empty() %}{{ campaign.brief.campaign_goal }}{% else if campaign.brief.objective.is_empty() %}展示假设 · 到店试饮{% else %}待确认{% endif %}</dd></div>
+  <div><dt>目标人群</dt><dd>{% if campaign.brief.audience.is_empty() %}展示假设 · 上海重点商圈的通勤人群和周末到访人群。{% else %}{{ campaign.brief.audience }}{% endif %}
+    {% if !campaign.brief.region.is_empty() %}<p>客户意向区域 · {{ campaign.brief.region }}</p>{% endif %}
+    {% if !campaign.target_centers.is_empty() %}<p>已确认查询中心 · {{ campaign.target_centers.join("、") }}，半径 {{ crate::media::FOOD_COVERAGE_RADIUS }} 米。</p>{% endif %}
+  </dd></div>
+  <div><dt>时间与预算</dt><dd>{{ campaign.starts }} 至 {{ campaign.ends }}，整案约 {{ campaign.budget }} 万元。</dd></div>
+  <div><dt>媒体范围</dt><dd>{{ campaign.media.label() }}</dd></div>
+  <div><dt>成功衡量</dt><dd>{% if campaign.brief.monitoring.is_empty() %}展示假设 · 分阶段、分商圈统计到店试饮扫码数，留存上下刊影像和结案报告。{% else %}{{ campaign.brief.monitoring }}{% endif %}</dd></div>
+</dl>

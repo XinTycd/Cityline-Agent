@@ -1,0 +1,43 @@
+{% extends "shell.html" %}
+{% block content %}
+<div class="page-heading">
+  <div><h1>{{ heading }}</h1><p>{{ task.summary() }}</p></div>
+  <div class="action-group">
+    {% if !gaps.is_empty() %}<a class="button" href="/media-proposals/tasks/{{ task.id }}/evidence?download=1" download>下载补证清单 CSV</a>{% endif %}
+    <a class="button secondary" href="/media-proposals/tasks/{{ task.id }}">返回任务</a>
+  </div>
+</div>
+<section class="panel list-panel" aria-label="按锁定采购清单列出待补依据">
+  {% if gaps.is_empty() %}
+  <p class="list-empty">该版本的计划投放阶段没有待补的依据。</p>
+  {% else %}
+  <div class="task-rail" role="region" tabindex="0" aria-label="待补依据明细">
+    <table class="work-table">
+      <caption class="visually-hidden">锁定 A／B 清单对应的档期、资源、证据缺口及补证入口</caption>
+      <thead><tr><th scope="col">档期</th><th scope="col">方案</th><th scope="col">缺项</th><th scope="col">入选资源</th><th scope="col">需要的依据</th><th scope="col">操作</th></tr></thead>
+      <tbody>
+      {% for (gap, variants) in gaps %}
+        <tr>
+          <td>{{ gap.starts }} 至 {{ gap.ends }}</td>
+          <td>{{ variants }}</td>
+          <th scope="row">{{ gap.kind }}</th>
+          <td>{% if gap.resource.is_empty() %}—{% else %}{{ gap.resource }}{% endif %}{% if !gap.code.is_empty() %}<br>{{ gap.code }}{% endif %}</td>
+          <td>{{ gap.needed }}{% if !gap.existing.is_empty() %}<br>{{ gap.existing }}{% endif %}</td>
+          <td>
+            {% if gap.kind == "施工条件" %}
+            <a href="/media-proposals/tasks/{{ task.id }}?review=operations">复核施工</a>
+            {% else if gap.kind == "库存与组合" %}
+            {% if let Some(batch) = gap.batch %}<a href="/media-data?batch={{ batch }}&amp;task={{ task.id }}">查看库存快照</a>
+            {% else %}<a href="/media-proposals/tasks/{{ task.id }}">重新取数</a>{% endif %}
+            {% else if let Some(batch) = gap.batch %}
+            <a href="/media-data?batch={{ batch }}&amp;task={{ task.id }}">补充本档期证据</a>
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}

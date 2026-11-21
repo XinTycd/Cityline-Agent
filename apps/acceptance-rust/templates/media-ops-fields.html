@@ -1,0 +1,12 @@
+<p>已与运营确认时，录入获准窗口、上下刊的保守产能和天气缓冲。</p>
+<div class="media-fields">
+  <label>核对依据<input name="ops_source" type="text" maxlength="100" placeholder="脱敏排班表或运营确认记录"></label>
+  <label>夜间时间（北京时间）<input name="ops_hours" type="text" maxlength="11" placeholder="22:00-05:00"></label>
+  <label>公交单晚产能（辆）<input name="ops_bus" type="number" min="1" max="10000" step="1"></label>
+  <label>地铁单晚产能（处）<input name="ops_metro" type="number" min="1" max="10000" step="1"></label>
+  <label>每个窗口天气缓冲（晚）<input name="ops_buffer" type="number" min="0" max="366" step="1"></label>
+</div>
+<label>获准施工日期<textarea name="ops_windows" rows="3" maxlength="1200" placeholder="2027-05-01 | 2027-04-25 至 2027-04-28 | 2027-06-01 至 2027-06-03"></textarea></label>
+<p>每行依次填写采购段起始日、上刊窗口、下刊窗口。窗口日期按开始作业的当晚填写，所填范围每晚均须可施工。</p>
+<label class="media-confirm"><input type="checkbox" name="ops_parallel" value="1">公交和地铁有独立班组，可同时施工</label>
+<label class="media-confirm"><input type="checkbox" name="ops_confirmed" value="1">已核对窗口、产能和排班依据</label>

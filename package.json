@@ -1,0 +1,8 @@
+{
+  "name": "cityline-local-refresh",
+  "private": true,
+  "dependencies": {
+    "csv-parse": "7.0.3",
+    "playwright-core": "1.65.1"
+  }
+}

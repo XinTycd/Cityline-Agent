@@ -1,0 +1,214 @@
+.report-page {
+  --report-content: 1440px;
+  --report-inset: clamp(14px, 3vw, 32px);
+  --report-radius: 8px;
+  --report-warning: #805117;
+  --report-warning-line: #f1d5a9;
+  --report-warning-bg: #fff9ec;
+  line-height: 1.6;
+}
+.report-page .report-header {
+  flex-wrap: wrap;
+  column-gap: 24px;
+  row-gap: 8px;
+  min-height: 64px;
+  padding-inline: max(var(--report-inset), calc((100% - var(--report-content)) / 2 + var(--report-inset)));
+}
+.report-header .brand {
+  min-width: 0;
+  padding: 0;
+}
+.report-header nav {
+  gap: 4px 16px;
+  min-width: 0;
+}
+.report-header nav a {
+  display: flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: .9rem;
+}
+.report-header nav a:hover, .report-header nav a:focus-visible {
+  background: var(--blue-soft);
+  color: var(--blue-strong);
+}
+@media (min-width: 901px) {
+  html:has(.report-page) { scroll-padding-top: 82px; }
+  .report-page .report-header { position: sticky; z-index: 2; top: 0; }
+}
+.report-page main {
+  max-width: var(--report-content);
+  gap: 20px;
+  padding: 24px var(--report-inset) 36px;
+  overflow-wrap: anywhere;
+}
+.report-page main > .panel {
+  min-width: 0;
+  gap: 16px;
+  padding: var(--report-inset);
+  border-radius: var(--report-radius);
+}
+.report-page main h2 { font-size: 1.2rem; }
+.report-page main h3 { font-size: 1.02rem; }
+.report-page .report-cover { border-block-start: 3px solid var(--blue); }
+.report-cover-head p, .report-section-head p { margin-block-start: 5px; }
+.report-page .report-cover h1 { font-size: clamp(1.55rem, 3vw, 2.25rem); }
+.report-overview { gap: 12px; }
+.report-page .report-overview dd {
+  margin-block-start: 4px;
+  font-size: clamp(1rem, 1.75vw, 1.32rem);
+  line-height: 1.45;
+}
+.report-page .report-overview .report-dates { font-size: 1rem; line-height: 1.6; }
+.report-page .report-draft,
+.report-page .media-notice.warning {
+  background: var(--report-warning-bg);
+  border-color: var(--report-warning-line);
+  color: var(--report-warning);
+}
+.report-page .report-draft a { color: inherit; }
+.report-page .report-guidance {
+  gap: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--report-radius);
+  overflow: hidden;
+}
+.report-page .report-guidance > div {
+  display: grid;
+  grid-template-columns: minmax(125px, 1fr) minmax(0, 3fr);
+  padding: 0;
+  min-width: 0;
+  border: 0;
+}
+.report-page .report-guidance > div + div { border-block-start: 1px solid var(--line); }
+.report-page .report-guidance dt, .report-page .report-guidance dd { padding: 10px 14px; margin: 0; }
+.report-page .report-guidance dt { background: var(--rail); font-size: .9rem; font-weight: 600; }
+.report-page .report-guidance dd { color: var(--text); }
+.report-page .report-guidance dd > ul { margin-block: 0; }
+.report-page .report-guidance dd > p:not(:first-child) { margin-block-start: 6px; }
+.report-page .report-variants {
+  container: report-variants / inline-size;
+  --variant-gap: 16px;
+  --variant-padding: 16px;
+}
+.report-page .report-variant-picker {
+  gap: 4px;
+  background: var(--rail);
+  border-radius: var(--report-radius);
+}
+.report-page .report-variant-picker label {
+  min-height: 44px;
+  border-radius: 6px;
+  padding: 5px;
+  line-height: 1.25;
+}
+.report-page .report-variant-picker label:hover { color: var(--blue-strong); }
+.report-page .report-variant-picker label:has(input:checked) { border-color: var(--accent-line); }
+.report-page .report-variant-picker small { margin-block-start: 4px; }
+.report-page .report-variant-grid { gap: var(--variant-gap); }
+.report-page .report-variants:has(#report-view-all:checked) .report-variant-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+.report-page .report-variants:has(#report-view-all:checked) .report-variant {
+  grid-row: auto;
+  grid-template-rows: none;
+}
+.report-page .report-variant { padding: var(--variant-padding); border-radius: var(--report-radius); }
+.report-page .report-variant-group { gap: 12px; }
+.report-variant-group h4 { font-size: .95rem; font-weight: 650; }
+.report-page .report-variant-group + .report-variant-group { padding-block-start: 16px; }
+.report-page .report-variant .media-stats div { background: var(--rail); }
+.report-page .report-route-map { margin: 0 auto; width: 100%; max-inline-size: 960px; }
+@container report-variants (min-width: 1056px) {
+  .report-page .report-variants:has(#report-view-all:checked) .report-variant-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .report-page .report-variants:has(#report-view-all:checked) .report-variant {
+    grid-row: span 4;
+    grid-template-rows: subgrid;
+  }
+  .report-page .report-variant .report-route-map {
+    max-inline-size: calc((100cqi - var(--variant-gap)) / 2 - 2 * (var(--variant-padding) + 1px));
+  }
+}
+.report-page .report-evidence {
+  min-width: 0;
+  margin: 0;
+  padding-block-end: 4px;
+}
+.report-page .report-evidence > summary,
+.report-page details.media-item > summary {
+  padding: 7px 10px;
+  border-radius: 6px;
+  background: var(--rail);
+  font-size: .9rem;
+  font-weight: 600;
+}
+.report-page .report-evidence > summary:hover,
+.report-page details.media-item > summary:hover { background: var(--blue-soft); }
+.report-page .report-supporting-data > summary { font-size: 1.12rem; }
+.report-page .report-supporting-data > section + section {
+  margin-block-start: 18px;
+}
+.report-page .report-supporting-data > section > h2 { margin-block-end: 10px; }
+.report-page .report-supporting-data > section > :is(h3, p) { margin-block: 8px; }
+.report-page .task-rail:has(.report-table) {
+  border: 1px solid var(--line);
+  border-radius: var(--report-radius);
+}
+.report-page .report-table {
+  min-width: 640px;
+  font-size: .875rem;
+}
+.report-page .report-variant-table { min-width: 890px; }
+.report-page .report-table :is(td, th) {
+  padding: 9px 12px;
+  border-block-end: 1px solid var(--line);
+}
+.report-page .report-table thead th { background: var(--rail); color: var(--text); font-weight: 600; }
+.report-page .report-table tbody th { min-width: 120px; font-weight: 600; }
+.report-page .report-table tbody tr:hover { background: var(--control-hover); }
+.report-page .report-table tbody tr:last-child > * { border-block-end: 0; }
+.report-page .report-table tfoot > tr > * {
+  border-block-start: 1px solid var(--line);
+  border-block-end: 0;
+  background: var(--rail);
+  font-weight: 600;
+}
+.report-variant-table :is(th, td):nth-child(n + 3):nth-child(-n + 6),
+.report-purchase-table :is(th, td):nth-child(n + 3),
+.report-purchase-table tfoot td,
+.report-schedule-table :is(th, td):is(:nth-child(2), :last-child) {
+  text-align: end;
+}
+@media (max-width: 640px) {
+  .report-page .report-header { align-items: flex-start; flex-direction: column; }
+  .report-header nav { gap: 0 6px; }
+  .report-header nav a { padding-inline: 5px; font-size: .83rem; }
+  .report-page main { gap: 14px; padding-block-start: 14px; }
+  .report-page .report-guidance > div { grid-template-columns: minmax(0, 1fr); }
+  .report-page .report-guidance dt { padding-block: 6px; }
+  .report-page .report-variant,
+  .report-page .report-variants { --variant-padding: 12px; }
+}
+@media print {
+  .report-page .report-header { position: static; padding-inline: 0; }
+  .report-page main { padding: 0; }
+  .report-page .report-variant-picker { display: none; }
+  .report-page .report-variants:has(#report-view-1:checked) .report-variant:not(#variant-1),
+  .report-page .report-variants:has(#report-view-2:checked) .report-variant:not(#variant-2) { display: grid; }
+  .report-page .report-variants:has(#report-view-all:checked) .report-variant-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .report-page .report-variants:has(#report-view-all:checked) .report-variant {
+    grid-row: auto;
+    grid-template-rows: none;
+  }
+  .report-page .report-map-window { break-inside: avoid; }
+  .report-page .task-rail { overflow: visible; }
+  .report-page .report-table, .report-page .report-table tbody th { min-width: 0; }
+  .report-page .report-table :is(th, td) { padding: 4px 5px; }
+}

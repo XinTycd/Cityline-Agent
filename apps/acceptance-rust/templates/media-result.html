@@ -1,0 +1,75 @@
+<section class="panel" aria-labelledby="media-result-title">
+  <div class="result-header"><h2 id="media-result-title">{{ industry.brand() }}投放提案</h2><span class="badge">{% if view.snapshot.data.demo %}合成演示{% else %}已导入赛用数据{% endif %}</span></div>
+  <p>演示活动假设 · {{ industry.campaign() }}</p>
+  <dl class="media-stats">
+    <div><dt>费用区间</dt><dd>¥{{ view.proposal.total.low }}–{{ view.proposal.total.high }}</dd></div>
+    <div><dt>选中资源</dt><dd>{{ view.proposal.items.len() }}</dd></div>
+    <div><dt>覆盖目标圈</dt><dd>{{ view.proposal.covered.len() }}</dd></div>
+    <div><dt>预算量级</dt><dd>约 {{ budget }} 万元</dd></div>
+  </dl>
+  <label class="media-budget">预算占用（按刊例上限）
+    <meter min="0" max="{{ budget * 10000 }}" value="{{ view.proposal.total.high }}">¥{{ view.proposal.total.high }}</meter>
+  </label>
+  <p>投放 {{ view.snapshot.starts }} 至 {{ view.snapshot.ends }} · 库存核对 {{ view.snapshot.observed }}{% if !view.snapshot.data.demo %}（北京时间）{% endif %} · 导入时间 {{ view.snapshot.imported }}（UTC）</p>
+  {% if !view.snapshot.data.demo %}<p>快照来源 · {{ view.snapshot.source }}</p>{% endif %}
+  <p>公交 {{ view.proposal.quantity(crate::media::BUS) }} 辆 · 地铁 {{ view.proposal.quantity(crate::media::METRO) }} 处</p>
+  {% if let Some(center) = view.snapshot.data.supplemental_metro_center %}<p>地铁补充圈 · {{ center }}。用于到访路线的地铁换乘触达。</p>{% endif %}
+  <p>价格含已核对的发布费及制作费。发布费按覆盖的 {{ view.months }} 个自然月估算，制作费按本批制作计；不足整月仍列月度刊例，实际结算待业务确认。</p>
+  {% if !view.proposal.complete_media %}<p class="media-notice warning" role="status">当前缺少同时包含公交和地铁、且符合预算的组合。</p>{% endif %}
+  {% if let Some(change) = view.changes %}
+  <details open>
+    <summary>与 {{ change.previous }} 万预算方案比较</summary>
+    <p>保留 {{ change.kept }} 项 · 新增 {{ change.added.len() }} 项 · 移除 {{ change.removed.len() }} 项</p>
+    <p>对照方案费用上限 ¥{{ change.previous_high }} · 当前 ¥{{ view.proposal.total.high }}</p>
+    <p>车辆从 {{ change.previous_buses }} 辆调至 {{ view.proposal.quantity(crate::media::BUS) }} 辆 · 地铁点位从 {{ change.previous_exits }} 处调至 {{ view.proposal.quantity(crate::media::METRO) }} 处</p>
+    {% if let Some(explanation) = change.explanation %}<p>{{ explanation }}</p>{% endif %}
+    {% if !change.quantities.is_empty() %}<h3>数量调整</h3><ul>{% for change in change.quantities %}<li>{{ change.title }} · {{ change.before }} → {{ change.after }}</li>{% endfor %}</ul>{% endif %}
+    {% if !change.gained_circles.is_empty() %}<p>新增覆盖 · {% for circle in change.gained_circles %}{{ circle }}{% if !loop.last %}、{% endif %}{% endfor %}</p>{% endif %}
+    {% if !change.lost_circles.is_empty() %}<p>不再覆盖 · {% for circle in change.lost_circles %}{{ circle }}{% if !loop.last %}、{% endif %}{% endfor %}</p>{% endif %}
+    {% if !change.added.is_empty() %}<h3>新增</h3><ul>{% for name in change.added %}<li>{{ name }}</li>{% endfor %}</ul>{% endif %}
+    {% if !change.removed.is_empty() %}<h3>移除</h3><ul>{% for name in change.removed %}<li>{{ name }}</li>{% endfor %}</ul>{% endif %}
+  </details>
+  {% endif %}
+</section>
+
+{% if !view.proposal.required_routes.is_empty() %}
+<section class="panel" id="required-routes" aria-labelledby="required-routes-title">
+  <h2 id="required-routes-title">客户必选线路核验</h2>
+  <dl class="report-guidance">
+    {% for route in view.proposal.required_routes %}<div>
+      <dt>{{ route.name }} · {% if route.selected %}已入选{% else %}待确认{% endif %}</dt>
+      <dd>{{ route.reason }}</dd>
+    </div>{% endfor %}
+  </dl>
+</section>
+{% endif %}
+
+<section class="panel" aria-labelledby="media-items">
+  <h2 id="media-items">媒体清单与选址依据</h2>
+  {% if view.proposal.items.is_empty() %}<p>本次没有通过全部条件的媒体。</p>{% endif %}
+  {% for item in view.proposal.items %}
+  <details class="media-item">
+    <summary><strong>{{ item.stock.name }}</strong> · {{ item.stock.medium.label() }} · {{ item.stock.format }} · ¥{{ item.total.low }}–{{ item.total.high }}{% if item.client_required %} · 客户必选{% endif %}</summary>
+    <p>本案数量 {{ item.quantity }} · 所查档期可售 {{ item.stock.free }} · {{ item.stock.grade }} {{ item.stock.operator }}</p>
+    <p>单位发布费 ¥{{ item.rate.fee.low }}–{{ item.rate.fee.high }} · 单位制作费 ¥{{ item.production.low }}–{{ item.production.high }}</p>
+    <p>红豆库存依据 · {{ item.stock.source.file }} 第 {{ item.stock.source.row }} 行</p>
+    {% if !item.stock.code.is_empty() %}<p>红豆点位编号 {{ item.stock.code }}{% if item.stock.station_attested %} · 站名已由导入人核对{% endif %}</p>{% endif %}
+    {% if let Some(spec) = item.stock.metro_spec %}<p>红豆规格依据 · {{ spec.source.file }} 第 {{ spec.source.row }} 行{% if let Some(area) = item.stock.area %} · 计价面积 {{ area }} ㎡{% endif %}{% if !spec.remark.is_empty() %} · {{ spec.remark }}{% endif %}</p>{% endif %}
+    <p>刊例依据 · {{ item.rate.source.file }} 第 {{ item.rate.source.row }} 行</p>
+    {% if item.coverage.is_empty() %}<p>按客户指定线路入选，目标圈覆盖待复核。</p>{% else %}
+    <ul>{% for cover in item.coverage %}<li>{% if cover.station.is_some() %}站点覆盖{% else %}覆盖{% endif %} {{ cover.circle }}（{{ cover.radius }} 米）{% if let Some(distance) = cover.distance %}{% if cover.station.is_some() %} · {{ cover.name }} 站点距离 {{ distance }} 米{% else %} · 平台记录最近距离 {{ distance }} 米{% endif %}{% endif %} · {{ cover.source.file }} 第 {{ cover.source.row }} 行</li>{% endfor %}</ul>
+    {% endif %}
+  </details>
+  {% endfor %}
+  {% if !view.proposal.excluded.is_empty() %}
+  <details class="media-item">
+    <summary>查看待核或未入选项（{{ view.proposal.excluded.len() }}）</summary>
+    <ul>{% for item in view.proposal.excluded.iter().take(80) %}<li>{{ item.name }} · {{ item.why }}
+      {% if let Some(stock) = item.stock %}<p>可售 {{ stock.free }} · {{ stock.grade }}{% if !stock.code.is_empty() %} · {{ stock.code }}{% endif %} · {{ stock.source.file }} 第 {{ stock.source.row }} 行{% if stock.station_attested %} · 站名已由导入人核对{% endif %}</p>{% endif %}
+      {% if let Some(stock) = item.stock %}{% if let Some(spec) = stock.metro_spec %}<p>红豆规格依据 · {{ spec.source.file }} 第 {{ spec.source.row }} 行{% if !spec.remark.is_empty() %} · {{ spec.remark }}{% endif %}</p>{% endif %}{% endif %}
+      {% if let Some(rate) = item.rate %}<p>单位发布费 ¥{{ rate.fee.low }}–{{ rate.fee.high }} · {{ rate.source.file }} 第 {{ rate.source.row }} 行</p>{% endif %}
+      {% for cover in item.coverage %}{% if cover.station.is_some() %}<p>{{ cover.name }} · {% if let Some(distance) = cover.distance %}站点距离 {{ distance }} 米 · {% endif %}{{ cover.source.file }} 第 {{ cover.source.row }} 行</p>{% endif %}{% endfor %}
+    </li>{% endfor %}</ul>
+  </details>
+  {% endif %}
+</section>

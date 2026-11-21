@@ -1,0 +1,89 @@
+{% extends "shell.html" %}
+{% block content %}
+<div class="page-heading">
+  <div><h1>{{ heading }}</h1><p>核对档期、赛用快照和投放证据。</p></div>
+  {% if let Some(task) = source_task %}<a class="button secondary" href="/media-proposals/tasks/{{ task }}">返回原提案任务</a>
+  {% else %}<a class="button secondary" href="/media-proposals">发起平台取数</a>{% endif %}
+</div>
+<section class="panel" aria-labelledby="snapshot-library">
+  <h2 id="snapshot-library">{% if batch.is_some() %}档期快照{% else %}可用数据快照{% endif %}</h2>
+  <details class="import-options">
+    <summary>补证文件格式</summary>
+    <p>触达明细列头为媒体类型、资源编号或线路、统计月份、每日触达人次、计量单位、来源记录。统计月份填 2023-MM。公交单位用「人次/辆/天」，地铁用「人次/点位/天」。平台标签日均人次只用于历史参考。</p>
+    <p>轨迹文件使用 GeoJSON。公交上传原始折线，地铁上传出入口实点。资源编号需匹配红豆库存，使用新云原始查询记录注明来源。</p>
+  </details>
+  {% if batch.is_some() %}<p><a href="/media-data">查看全部快照</a></p>{% else %}
+  <form action="/media-data" method="get" role="search" aria-label="查询快照" class="snapshot-filters" data-workspace-submit>
+    <div class="filter-form range-filter-form">
+      <label>从<input type="date" name="starts" value="{{ starts }}" min="2027-01-01" max="2027-12-31"></label>
+      <label>至<input type="date" name="ends" value="{{ ends }}" min="2027-01-01" max="2027-12-31"></label>
+      <label>快照来源<select name="source">
+        <option value="">全部</option>
+        <option value="platform"{% if source == "platform" %} selected{% endif %}>平台实时导出</option>
+        <option value="local"{% if source == "local" %} selected{% endif %}>本地导入与历史快照</option>
+      </select></label>
+      <div class="action-group filter-actions">
+        <button type="submit">查询</button>
+        <a class="button secondary" href="/media-data">重置</a>
+      </div>
+    </div>
+    {% include "list-pages.html" %}
+  </form>
+  {% endif %}
+  {% if snapshots.is_empty() %}<p class="list-empty">当前范围内没有快照。可调整日期、发起平台取数或导入赛用文件。</p>{% endif %}
+  {% for snapshot in snapshots %}
+  <article class="snapshot-row">
+    <div>
+      <strong>{{ snapshot.starts }} 至 {{ snapshot.ends }}</strong> <span class="badge">{{ snapshot.source }}</span>
+      <p>{{ snapshot.media }} · 库存核对 {{ snapshot.observed }}</p>
+      <small>快照 {{ snapshot.id }}</small>
+    </div>
+    <a class="button secondary" href="/media-plans?industry=food&amp;media={{ snapshot.selection }}&amp;starts={{ snapshot.starts }}&amp;ends={{ snapshot.ends }}&amp;batch={{ snapshot.id }}">核对快照</a>
+  </article>
+  <details class="import-options"{% if batch.is_some() %} open{% endif %}>
+    <summary>补充此快照的线路或触达依据</summary>
+    <p>可以只上传需要补齐的资源。提交时以这份快照的最新证据版本为基础，按资源及统计月份合并。历史快照仍可查看。</p>
+    <form method="post" action="/api/media-proposals/snapshots/{{ snapshot.id }}/evidence{% if let Some(task) = source_task %}?task={{ task }}{% endif %}" enctype="multipart/form-data" data-workspace-submit>
+      <div class="media-fields">
+        <label>线路轨迹和出口坐标<input type="file" name="route_geometry" accept=".geojson,.json"></label>
+        <label>触达明细表<input type="file" name="reach" accept=".csv,.xlsx,.xls"></label>
+        <label>新云线路原图<input type="file" name="official_maps" accept=".json"></label>
+      </div>
+      <label class="media-confirm"><input type="checkbox" name="attested" value="yes" required>已核对新证据和本快照的档期与资源。</label>
+      <button class="secondary" type="submit">保存补证版本</button>
+    </form>
+  </details>
+  {% endfor %}
+</section>
+<details class="panel" id="media-import">
+  <summary>手动补录赛用数据</summary>
+  <p>上传同一档期的红豆库存、新云覆盖和赛题刊例。公交和地铁可按需上传。每份文件最大 2 MiB。</p>
+  <form method="post" action="/api/media-proposals/import" enctype="multipart/form-data" data-workspace-submit>
+    <input type="hidden" name="industry" value="food">
+    <div class="media-fields">
+      <label>库存开始日期<input type="date" name="starts" min="2027-01-01" max="2027-12-31" value="{{ starts }}" required></label>
+      <label>库存结束日期<input type="date" name="ends" min="2027-01-01" max="2027-12-31" value="{{ ends }}" required></label>
+      <label>库存核对时间<input type="datetime-local" name="observed_at" required></label>
+      <label>脱敏刊例<input type="file" name="rates" accept=".csv,.xlsx,.xls" required></label>
+      <label>红豆公交库存<input type="file" name="bus_stock" accept=".csv,.xlsx,.xls" multiple></label>
+      <label>红豆地铁库存<input type="file" name="metro_stock" accept=".csv,.xlsx,.xls"></label>
+      <label>红豆地铁规格<input type="file" name="metro_specs" accept=".csv,.xlsx,.xls"></label>
+      <label>新云合并覆盖<input type="file" name="combined_coverage" accept=".csv,.xlsx,.xls"></label>
+    </div>
+    <details class="import-options">
+      <summary>上传独立覆盖表或补充原表字段</summary>
+      <div class="media-fields">
+        <label>公交覆盖<input type="file" name="bus_coverage" accept=".csv,.xlsx,.xls"></label>
+        <label>地铁覆盖<input type="file" name="metro_coverage" accept=".csv,.xlsx,.xls"></label>
+        <label>指定公交线路<input type="text" name="required_routes" maxlength="130"></label>
+        <label>目标圈<input type="text" name="circle" maxlength="70"></label>
+        <label>半径（米）<input type="number" name="radius" min="1" max="5000"></label>
+        <label>红豆地铁站名<input type="text" name="metro_station" maxlength="60"></label>
+        <label>新云合并表中心点<input type="text" name="cover_center" maxlength="260"></label>
+      </div>
+    </details>
+    <label class="media-confirm"><input type="checkbox" name="attested" value="yes" required>已核对库存档期、数据授权与脱敏情况。</label>
+    <div class="form-actions"><button type="submit">校验并导入</button></div>
+  </form>
+</details>
+{% endblock %}

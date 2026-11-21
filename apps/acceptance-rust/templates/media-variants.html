@@ -1,0 +1,157 @@
+<section class="panel report-variants" aria-labelledby="proposal-variants">
+  <div class="report-section-head">
+    <h2 id="proposal-variants">方案 A／B 对比与发布推荐</h2>
+    <p>沿用同一预算量级、客户简报、必选线路、投放媒体和档期，比较两种投放策略。</p>
+  </div>
+  <fieldset class="report-variant-picker">
+    <legend class="report-picker-label">选择要查看的方案</legend>
+    <label><input type="radio" name="report-view" id="report-view-all" checked><strong>A／B 对比</strong></label>
+    {% for variant in variants %}
+    <label><input type="radio" name="report-view" id="report-view-{{ loop.index }}"><strong>方案 {{ variant.code }}</strong><small>{{ variant.name }}</small></label>
+    {% endfor %}
+  </fieldset>
+  <div class="report-variant-grid">
+  {% for variant in variants %}
+  {% let variant_index = loop.index %}
+  <article class="report-variant" id="variant-{{ variant_index }}" aria-labelledby="variant-title-{{ variant_index }}">
+    <div class="report-variant-group">
+    <h3 id="variant-title-{{ variant_index }}">方案 {{ variant.code }} · {{ variant.name }}</h3>
+    <p><strong>方案优点</strong> {{ variant.advantage }}</p>
+    {% if let Some(duplicate) = variant.same_as %}<p class="report-caption">在当前档期、必选项和可核价库存条件下，本案的资源和数量与「{{ duplicate }}」一致。</p>{% endif %}
+    {% if !variant.available %}<p class="media-notice report-draft">待调整。当前库存、采购条件或必选资源尚未满足全部档期。</p>
+    {% else if !variant.has_full_evidence() %}<p class="media-notice report-draft">覆盖和触达证据待补。当前版本供内部核对。</p>{% endif %}
+    <dl class="media-stats">
+      <div><dt>预算目标量级</dt><dd>约 {{ variant.limit }} 万元</dd></div>
+      <div><dt>刊例估算</dt><dd>{{ crate::media::wan(variant.total.low) }}–{{ crate::media::wan(variant.total.high) }} 万元</dd></div>
+      <div><dt>高位报价与目标差额</dt><dd>{% if variant.above_target %}+{% else if variant.target_difference > 0 %}−{% endif %}{{ crate::media::wan(variant.target_difference) }} 万元</dd></div>
+      <div><dt>已核对目标圈</dt><dd>{{ variant.circles }} 个</dd></div>
+      <div><dt>公交线路</dt><dd>{{ variant.bus_lines }} 条</dd></div>
+      <div><dt>公交投放</dt><dd>{{ variant.buses }} {% if variant.periods.len() > 1 %}辆次{% else %}辆{% endif %}</dd></div>
+      <div><dt>地铁投放</dt><dd>{{ variant.exits }} {% if variant.periods.len() > 1 %}处次{% else %}处{% endif %}</dd></div>
+    </dl>
+    <details class="report-evidence"{% if variant.above_target || !variant.available %} open{% endif %}>
+      <summary>预算约束与差额</summary>
+      {% let bus = variant.media_cost(crate::media::BUS) %}
+      {% let metro = variant.media_cost(crate::media::METRO) %}
+      <p>已排资源的发布费和制作费合计。公交 {{ crate::media::wan(bus.low) }}–{{ crate::media::wan(bus.high) }} 万元，地铁 {{ crate::media::wan(metro.low) }}–{{ crate::media::wan(metro.high) }} 万元。</p>
+      {% if variant.total.high > 0 %}<p>按高位报价计，公交占 {{ variant.high_quote_share(bus.high) }}，地铁占 {{ variant.high_quote_share(metro.high) }}。</p>{% endif %}
+      {% if let Some(budget) = variant.budget_basis() %}
+        <p>在可核价资源范围内，每个采购段保留必选线路并纳入各指定媒体，最低高位报价合计 <strong>{{ crate::media::wan(budget.minimum) }} 万元</strong>。</p>
+        {% if budget.target_gap > 0 %}<p>即使采用最低高位报价组合，金额仍超出目标 {{ crate::media::wan(budget.target_gap) }} 万元。可与客户确认是否减少一个采购段、调整媒体范围或提高预算。</p>
+        {% else if variant.above_target %}<p>当前组合的高位报价高于目标。可参考各段最低组合减少车辆或更换点位，并复核覆盖与触达。</p>{% endif %}
+        {% if budget.cap_gap > 0 %}<p>按高位刊例测算，最低组合超过客户硬上限 {{ crate::media::wan(budget.cap_gap) }} 万元。需先确认可调整的采购条件。</p>{% endif %}
+      {% else %}<p>至少一个采购段缺少匹配库存、指定媒体或必选线路的有效刊例，整案最低报价待核对。</p>{% endif %}
+      <ul>
+        {% for period in variant.periods %}<li>{{ period.starts }} 至 {{ period.ends }}
+          {% if let Some(basis) = period.quote_floor %}{% if basis.complete %}
+            · 本段最低高位报价 {{ crate::media::wan(basis.high) }} 万元
+            <ul>{% for item in basis.resources %}<li>{{ item.medium.label() }} · {{ item.name }} · {{ item.format }} · ¥{{ item.high }}</li>{% endfor %}</ul>
+          {% else %}· 最低组合待核对{% endif %}{% else %}· 缺少匹配快照{% endif %}
+        </li>{% endfor %}
+      </ul>
+    </details>
+    </div>
+    <div class="report-variant-group">
+    <h4>投放线路图</h4>
+    {% for period in variant.periods %}{% if let Some(map) = period.official_map %}
+    <figure class="report-route-map">
+      <div class="report-map-window" role="group" tabindex="0" aria-label="{{ variant.name }}线路图">
+        <img alt="{{ variant.name }}所选公交线路 · {{ map.routes.len() }} 条" src="data:image/jpeg;base64,{{ map.image }}" decoding="async">
+      </div>
+      <figcaption>新云「AI 线路」{% if map.replayed %}原始轨迹回放{% endif %}截图 · {{ period.starts }} 至 {{ period.ends }} · {{ map.routes.len() }} 条公交线路 · 截图时间 {{ map.captured_at }}。</figcaption>
+    </figure>
+    {% else if period.screenshot_pending %}
+    <p class="report-caption">{{ period.starts }} 至 {{ period.ends }} · 待补本案实际入选线路的新云截图。</p>
+    {% endif %}{% endfor %}
+    {% if variant.map.has_data %}
+    <details class="report-evidence">
+      <summary>检查新云覆盖坐标与轨迹依据</summary>
+    <figure class="report-route-map">
+      <div class="report-map-window" role="group" tabindex="0" aria-label="{{ variant.name }}点位和线路轨迹">
+      <svg viewBox="0 0 760 360" preserveAspectRatio="xMidYMid meet" role="img" aria-labelledby="map-title-{{ variant_index }} map-desc-{{ variant_index }}">
+        <title id="map-title-{{ variant_index }}">{{ variant.name }} · 点位和线路轨迹</title>
+        <desc id="map-desc-{{ variant_index }}">图中坐标来自本案导入的资料。蓝色折线为原始公交轨迹，青色点为出口，紫色点为目标圈，空心点为最近轨迹点或站级位置。</desc>
+        <rect width="760" height="360" rx="12" class="route-map-background"/>
+        {% for line in variant.map.paths %}<polyline class="route-map-path" points="{{ line.coords }}"><title>{{ line.label }} · {{ line.source }}</title></polyline>{% endfor %}
+        {% for point in variant.map.points %}
+          <circle cx="{{ point.x }}" cy="{{ point.y }}" r="5" class="{{ point.class }}"><title>{{ point.label }} · {{ point.source }}</title></circle>
+          {% if variant.map.points.len() <= 9 %}<text class="route-map-label" x="{{ point.x }}" y="{{ point.y }}" dx="8" dy="-8">{% if point.class == "route-map-center" %}目标圈{% else %}{{ point.label }}{% endif %}</text>{% endif %}
+        {% endfor %}
+      </svg>
+      </div>
+      <figcaption>原表坐标投影 · 公交轨迹 {{ variant.map.buses }} 项 · 出口实点 {{ variant.map.exits }} 项 · 仅有覆盖落点 {{ variant.map.coverage_only }} 项 · 缺少坐标 {{ variant.map.missing }} 项。统计按档期资源项累计。</figcaption>
+    </figure>
+    <details class="report-evidence">
+      <summary>查看图上的资源与来源</summary>
+      <ul class="report-map-sources">{% for line in variant.map.paths %}<li>{{ line.label }} · {{ line.source }}</li>{% endfor %}{% for point in variant.map.points %}<li>{{ point.label }} · {{ point.source }}</li>{% endfor %}</ul>
+    </details>
+    {% if variant.map.coverage_only > 0 || variant.map.missing > 0 %}
+    <p class="report-caption">部分资源的完整线路或出口坐标待补。覆盖落点沿用新云原表，图中保留实际可核对的部分。</p>
+    {% endif %}
+    </details>
+    {% else %}
+    <p class="media-notice">此案待补新云的线路或出口坐标。报告会在取得坐标后绘制地图。</p>
+    {% endif %}
+    </div>
+    <div class="report-variant-group">
+    <h4>曝光量估算</h4>
+    <dl class="media-stats">
+      {% for metric in variant.metrics %}
+      <div><dt>{{ metric.name }} · {{ metric.status }}</dt>
+        {% if metric.known %}<dd>{{ metric.total }} 人次</dd>{% endif %}
+        {% if !metric.daily.is_empty() %}<dd class="report-metric-detail">日均 {{ metric.daily }} 人次</dd>{% endif %}
+        {% if metric.missing > 0 %}<dd class="report-metric-detail">{{ metric.missing }} 个档期资源项待补单位日触达</dd>{% endif %}
+        {% if metric.historical > 0 %}<dd class="report-metric-detail">{{ metric.historical }} 个档期资源项已有历史标签日均值</dd>{% endif %}
+      </div>
+      {% endfor %}
+    </dl>
+    </div>
+    <div class="report-variant-group">
+    <h4>采购与触达明细</h4>
+    {% for period in variant.periods %}
+    <details class="report-evidence">
+      <summary>{{ period.starts }} 至 {{ period.ends }} · {{ period.days }} 天</summary>
+      <p>{{ period.reason }} · 本段测算额度 {{ crate::media::wan(period.limit) }} 万元 · 已排资源 ¥{{ period.total.low }}–{{ period.total.high }}。</p>
+      {% if let Some(phase) = period.operations %}
+      <p><strong>上下刊窗口{% if !phase.ready() %}待复核{% endif %}</strong> · 公交需 {{ phase.bus_nights }} 晚，地铁需 {{ phase.metro_nights }} 晚，按确认的排班方式每项工序需 {{ phase.required }} 晚施工。</p>
+      <ul>{% for (label, work) in phase.steps() %}<li>{{ label }} {{ work.dates.from }} 至 {{ work.dates.through }} · 可用 {{ work.available }} 晚{% if work.shortage > 0 %} · 含缓冲还缺 {{ work.shortage }} 晚{% endif %}{% if work.outside_period %} · 与发布或下刊时间冲突{% endif %}{% if work.overlaps %} · 与其他阶段施工窗口重叠{% endif %}</li>{% endfor %}</ul>
+      {% else if period.operations_required %}<p>本段施工待核 · 需确认采购清单和获准施工窗口。</p>
+      {% endif %}
+      {% if let Some(observed) = period.observed %}<p class="report-caption">库存核对 · {{ observed }}</p>{% else %}<p>待导入该精确档期的红豆快照。</p>{% endif %}
+      {% for (medium, source) in period.empty_inventory %}<p class="report-caption">{{ medium.label() }} · 红豆库存 API 返回 0 条 · {{ source.file }}</p>{% endfor %}
+      {% if !period.rows.is_empty() %}
+      <div class="task-rail" role="region" tabindex="0" aria-label="采购与触达明细">
+        <table class="work-table report-table report-variant-table">
+          <thead><tr><th scope="col">线路或点位</th><th scope="col">级别</th><th scope="col">采购 / 可售</th><th scope="col">发布费（元/月·单位）</th><th scope="col">制作费（元/单位）</th><th scope="col">本项估算（元）</th><th scope="col">新云日均触达</th><th scope="col">档期曝光量</th></tr></thead>
+          <tbody>{% for row in period.rows %}
+            <tr>
+              <th scope="row">{{ row.stock.name }}<small>{{ row.media.label() }} · {{ row.stock.format }}{% if !row.stock.code.is_empty() %} · {{ row.stock.code }}{% endif %}{% if row.client_required %} · 客户必选{% endif %}</small>
+                {% if !period.has_geometry(row) %}<small>{% if row.media == crate::media::BUS %}待补线路轨迹或原图{% else %}待补出口实点坐标{% endif %}</small>{% endif %}
+              </th>
+              <td>{{ row.stock.grade }}</td><td>{{ row.quantity }} / {{ row.stock.free }}</td><td>{{ row.fee.low }}–{{ row.fee.high }}</td><td>{{ row.production.low }}–{{ row.production.high }}</td><td>{{ row.total.low }}–{{ row.total.high }}</td>
+              <td>{% for data in row.evidence %}<div>2023 年 {{ data.row.month }} 月{% if data.row.baseline %}历史基准{% endif %} · {{ data.row.formatted_daily() }}{% if row.media == crate::media::BUS %} 人次/辆/天{% else %} 人次/点位/天{% endif %}</div>{% endfor %}
+              {% if let Some(observed) = row.historical_reach %}<div>{{ observed.formatted_daily() }} 人次/天<small>2023 年 {{ observed.month }} 月 · 平台标签口径</small></div>{% else if row.evidence.is_empty() %}待核对{% endif %}</td>
+              <td>{% if !row.evidence.is_empty() %}{{ crate::media::visuals::format_count(row.exposures) }} 人次{% if !row.reach_complete() %}（部分）{% endif %}{% else %}待核对{% endif %}</td>
+            </tr>
+          {% endfor %}</tbody>
+        </table>
+      </div>
+      <details class="report-evidence">
+        <summary>原表与统计依据</summary>
+        <ul>{% for row in period.rows %}
+          <li><strong>{{ row.stock.name }}</strong> · 红豆 {{ row.stock.source.file }} 第 {{ row.stock.source.row }} 行 · 刊例 {{ row.rate_source.file }} 第 {{ row.rate_source.row }} 行
+            {% for cover in row.coverage %}<br>{{ cover.circle }} · {{ cover.source.file }} 第 {{ cover.source.row }} 行{% endfor %}
+            {% for data in row.evidence %}<br>2023 年 {{ data.row.month }} 月，覆盖本期 {{ data.days }} 天 · {{ data.row.reference }} · {{ data.row.source.file }} 第 {{ data.row.source.row }} 行{% endfor %}
+            {% if let Some(observed) = row.historical_reach %}<br>{{ observed.reference }} · {{ observed.source.file }} 第 {{ observed.source.row }} 行{% endif %}
+          </li>
+        {% endfor %}</ul>
+      </details>
+      {% endif %}
+    </details>
+    {% endfor %}
+    </div>
+  </article>
+  {% endfor %}
+  </div>
+  <p class="report-caption">曝光按新云核验的单位日触达量、资源数量和实际投放天数估算。历史标签日均值在明细中单列，公交与地铁组合人次按未去重口径展示。</p>
+</section>

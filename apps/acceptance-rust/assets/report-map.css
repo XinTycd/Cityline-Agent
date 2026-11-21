@@ -1,0 +1,33 @@
+.report-map-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; margin-block-end: 8px; color: var(--muted); font-size: .85rem; }
+.report-map-actions { display: flex; gap: 4px; align-items: center; }
+.report-map-actions button { min-width: 32px; min-height: 32px; padding: 2px 8px; font-size: .85rem; }
+.report-map-scale { min-width: 3.5em; text-align: center; font-variant-numeric: tabular-nums; }
+.report-map-window {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--report-radius, 8px);
+  background: var(--rail);
+}
+.report-map-window > :is(img, svg) {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  object-fit: contain;
+  border: 0;
+  border-radius: 0;
+  transform-origin: top left;
+}
+.report-route-map:has([data-interactive-map]) { animation: none; }
+.report-map-window[data-interactive-map] { touch-action: pan-y; user-select: none; }
+.report-map-window[data-map-zoomed] { cursor: grab; touch-action: none; }
+.report-map-window[data-map-dragging] { cursor: grabbing; }
+@media print {
+  .report-map-controls { display: none; }
+  .report-map-window[data-interactive-map] > :is(img, svg) { transform: none !important; }
+}

@@ -1,0 +1,44 @@
+{% extends "shell.html" %}
+{% block content %}
+<div class="page-heading">
+  <div><h1>{{ heading }}</h1><p>查看投放组合、预算变化及原始数据依据。</p></div>
+  <a class="button secondary" href="/media-proposals?industry={{ plan.industry.id() }}">发起新任务</a>
+</div>
+{% if let Some(view) = plan.result %}
+<section class="panel" aria-labelledby="plan-actions">
+  <h2 id="plan-actions">执行结果</h2>
+  {% if plan.demo %}<p class="media-notice">当前使用合成样例。</p>{% else %}<p>已读取城线保存的赛用快照，按该批库存、覆盖及刊例完成核算。</p>{% endif %}
+  <form action="/media-proposals/run" method="post" data-workspace-submit>
+    <input type="hidden" name="industry" value="{{ plan.industry.id() }}">
+    <input type="hidden" name="media" value="{{ plan.media.id() }}">
+    <input type="hidden" name="starts" value="{{ view.snapshot.starts }}">
+    <input type="hidden" name="ends" value="{{ view.snapshot.ends }}">
+    {% if let Some(id) = view.snapshot.id %}<input type="hidden" name="batch" value="{{ id }}">{% endif %}
+    {% if plan.demo %}<input type="hidden" name="demo" value="1">{% endif %}
+    <div class="media-fields">
+      <label>预算<select name="budget">{% for amount in plan.budgets.iter().copied() %}<option value="{{ amount }}"{% if amount == plan.budget %} selected{% endif %}>{{ amount }} 万元</option>{% endfor %}</select></label>
+      <label>对照预算<select name="compare"><option value="0">无</option>{% for amount in plan.budgets.iter().copied() %}<option value="{{ amount }}"{% if amount == plan.compare %} selected{% endif %}>{{ amount }} 万元</option>{% endfor %}</select></label>
+    </div>
+    <div class="form-actions">
+      <button type="submit">{% if plan.demo %}按此预算重算{% else %}重新取数并计算{% endif %}</button>
+      {% if view.proposal.complete_media && !view.proposal.items.is_empty() %}
+      <a class="button secondary" href="{{ plan.export_url(view.snapshot) }}&amp;preview=1" target="_blank" rel="noopener">预览独立 HTML</a>
+      <a class="button secondary" href="{{ plan.export_url(view.snapshot) }}" download>导出当前方案 HTML</a>
+      {% endif %}
+      {% if plan.model_available %}<button class="secondary" type="submit" formaction="/media-proposals/strategy">用 AI 建议提案重点</button>{% endif %}
+    </div>
+  </form>
+  {% if let Some(text) = plan.advice %}<p class="media-notice">{{ text }}</p>{% endif %}
+  {% if let Some(text) = plan.notice %}<p class="media-notice" role="status">{{ text }}</p>{% endif %}
+</section>
+{% let industry = plan.industry %}
+{% let budget = plan.budget %}
+{% include "media-result.html" %}
+{% else %}
+<section class="panel">
+  <h2>暂无可用快照</h2>
+  {% if let Some(text) = plan.notice %}<p role="status">{{ text }}</p>{% endif %}
+  <div class="action-group"><a class="button" href="/media-proposals">发起平台取数</a></div>
+</section>
+{% endif %}
+{% endblock %}

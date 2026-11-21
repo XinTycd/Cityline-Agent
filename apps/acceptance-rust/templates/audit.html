@@ -1,0 +1,54 @@
+{% extends "shell.html" %}
+{% block content %}
+<div class="page-heading"><div><h1>{{ heading }}</h1><p>{% if let Some(id) = task %}任务 {{ id }}{% else %}查看任务、审核、Agent 与连接服务的操作记录。{% endif %}</p></div>
+  {% if task.is_some() %}<a class="button secondary" href="/audit">查看全部日志</a>{% endif %}
+</div>
+<section class="panel filter-panel" aria-label="日志查询条件">
+  <form method="get" action="/audit" class="filter-form" role="search" aria-label="查询日志" data-workspace-submit>
+    <input type="hidden" name="page_size" value="{{ pages.size }}">
+    {% if let Some(id) = task %}<input type="hidden" name="task" value="{{ id }}">{% endif %}
+    <label>类别<select name="category"><option value="">全部</option>{% for item in categories %}
+      <option value="{{ item }}"{% if *item == category.as_str() %} selected{% endif %}>{{ item }}</option>
+    {% endfor %}</select></label>
+    <label>关键词<span class="search-control">
+      {% include "search-icon.html" %}
+      <input type="search" name="q" value="{{ q }}" maxlength="100" placeholder="操作、说明或任务编号">
+    </span></label>
+    <div class="action-group filter-actions">
+      <button type="submit">查询</button>
+      <a class="button secondary" href="/audit?page_size={{ pages.size }}{% if let Some(id) = task %}&amp;task={{ id }}{% endif %}">重置</a>
+    </div>
+  </form>
+</section>
+<section class="panel list-panel" aria-label="日志查询结果">
+  {% if events.is_empty() %}<p class="list-empty">没有符合条件的记录。</p>{% else %}
+  <div class="task-rail" role="region" tabindex="0" aria-label="审计日志表格">
+    <table class="work-table audit-table">
+      <colgroup><col class="audit-time"><col class="audit-category"><col class="audit-action"><col><col class="audit-task"></colgroup>
+      <thead><tr><th scope="col">时间（北京时间）</th><th scope="col">类别</th><th scope="col">操作</th><th scope="col">说明</th><th scope="col">任务</th></tr></thead>
+      <tbody>{% for event in events %}<tr>
+        <td><time datetime="{{ event.at }}">{{ event.at }}</time></td>
+        <td>{{ event.category }}</td><td title="{{ event.action }}">{{ event.action }}</td>
+        <td>{% if let Some(decision) = event.detail.decision %}
+          <div class="audit-decision-title"><strong>{{ decision.role }}</strong><span class="badge">{{ decision.validation }}</span></div>
+          <p class="audit-decision-meta">来源 {{ decision.source }} · {{ decision.attempts }} 次模型调用{% if decision.attempts > 0 %} · 步骤耗时 {{ decision.duration_ms }} ms{% endif %}</p>
+          {% if let Some(reason) = decision.reason %}<p class="audit-decision-meta">{{ reason }}</p>{% endif %}
+        {% endif %}{% if event.detail.structured %}
+          <details class="audit-record">
+            <summary>查看结构化记录</summary>
+            <pre tabindex="0" aria-label="结构化日志明细"><code>{{ event.detail.text }}</code></pre>
+          </details>
+        {% else %}{{ event.detail.text }}{% endif %}</td>
+        <td>{% if let Some(id) = event.task %}{% if event.task_open %}<a href="/media-proposals/tasks/{{ id }}">详情</a>{% else if task.is_none() %}<a href="/audit?task={{ id }}" title="{{ id }}">审计记录</a>{% else %}仅保留审计{% endif %}{% else %}—{% endif %}</td>
+      </tr>{% endfor %}</tbody>
+    </table>
+  </div>
+  {% endif %}
+  <form method="get" action="/audit" class="list-page-form" data-workspace-submit>
+    <input type="hidden" name="category" value="{{ category }}">
+    <input type="hidden" name="q" value="{{ q }}">
+    {% if let Some(id) = task %}<input type="hidden" name="task" value="{{ id }}">{% endif %}
+    {% include "list-pages.html" %}
+  </form>
+</section>
+{% endblock %}

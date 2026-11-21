@@ -1,0 +1,18 @@
+<div class="task-rail" role="region" tabindex="0" aria-label="{{ task_table_label }}">
+  <table class="work-table task-log-table">
+    <thead><tr><th scope="col">ID</th><th scope="col">名称</th><th scope="col" title="北京时间">创建时间</th><th scope="col" title="北京时间">最后修改时间</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead>
+    <tbody>
+      {% for row in tasks %}
+      {% let task = row.task %}
+      <tr>
+        <td>{{ row.sequence }}</td>
+        <td><a href="/media-proposals/tasks/{{ task.id }}">{{ task.name() }}</a></td>
+        <td>{% if let Some(time) = task.created_at %}<time datetime="{{ time }}+08:00">{{ time }}</time>{% else %}—{% endif %}</td>
+        <td>{% if let Some(time) = row.updated_at %}<time datetime="{{ time }}+08:00">{{ time }}</time>{% else %}—{% endif %}</td>
+        <td><span class="badge task-status" data-status="{{ task.list_status() }}">{{ task.list_status() }}</span></td>
+        <td><a href="/media-proposals/tasks/{{ task.id }}" aria-label="查看任务 {{ row.sequence }} 的详情">详情</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>

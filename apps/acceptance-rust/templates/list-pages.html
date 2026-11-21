@@ -1,0 +1,16 @@
+{% if pages.total.is_some() || pages.previous.is_some() || pages.next.is_some() %}
+<nav class="action-group pagination" aria-label="列表分页">
+  {% if let Some(total) = pages.total %}<span class="pagination-total">共 {{ total }} 项</span>{% endif %}
+  <div class="action-group pagination-navigation">
+  <button class="secondary" type="submit" name="page"{% if let Some(previous) = pages.previous %} value="{{ previous }}"{% else %} disabled{% endif %}>上一页</button>
+  <span class="pagination-current">第 {{ pages.page }}{% if pages.total.is_some() %} / {{ pages.page_count }}{% endif %} 页</span>
+  <button class="secondary" type="submit" name="page"{% if let Some(next) = pages.next %} value="{{ next }}"{% else %} disabled{% endif %}>下一页</button>
+  </div>
+  {% if pages.total.is_some() %}
+  <select class="pagination-size" name="page_size" aria-label="每页条数" data-page-size>
+    {% for size in pages.sizes %}<option value="{{ size }}"{% if *size == pages.size %} selected{% endif %}>{{ size }} 项 / 页</option>{% endfor %}
+  </select>
+  <noscript><button class="secondary" type="submit">应用</button></noscript>
+  {% endif %}
+</nav>
+{% endif %}

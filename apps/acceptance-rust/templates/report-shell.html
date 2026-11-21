@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <title>{% block title %}{% endblock %}</title>
+  <style>{{ css|safe }}</style>
+</head>
+<body class="report-page">
+  <a class="skip" href="#main">跳到内容</a>
+  <header class="report-header">
+    <div class="brand">
+      {% if let Some(png) = brand.logo %}<img src="data:image/png;base64,{{ png }}" width="34" height="34" alt="">{% else %}{{ crate::web::LOGO|safe }}{% endif %}
+      <span>{{ brand.name }}<small>{{ brand.description }}</small></span>
+    </div>
+    {% block report_nav %}{% endblock %}
+  </header>
+  <main id="main" tabindex="-1">
+    {% block report_content %}{% endblock %}
+  </main>
+</body>
+</html>

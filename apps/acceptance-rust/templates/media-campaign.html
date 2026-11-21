@@ -1,0 +1,11 @@
+{% extends "report-shell.html" %}
+{% block title %}食品饮料提案 · Campaign 假设书 · {{ brand.name }}{% endblock %}
+{% block report_content %}
+<section class="panel report-cover" aria-labelledby="campaign">
+  <div class="report-cover-head">
+    <h1 id="campaign">Campaign 假设书</h1>
+    <p>食品饮料 · 上海户外媒体提案</p>
+  </div>
+  {% include "media-campaign-fields.html" %}
+</section>
+{% endblock %}

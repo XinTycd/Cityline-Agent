@@ -1,0 +1,105 @@
+{% extends "shell.html" %}
+{% block content %}
+<div class="page-heading">
+  <div><h1>{{ heading }}</h1><p>食品饮料行业 · 上海商圈到店提案</p></div>
+  <form class="action-group" method="post" action="/media-proposals/run" data-workspace-submit>
+    <input type="hidden" name="demo" value="1">
+    <input type="hidden" name="budget" value="{{ budget }}">
+    <input type="hidden" name="industry" value="food">
+    <button class="secondary" type="submit">试用合成样例</button>
+  </form>
+</div>
+<details class="panel" data-brief-extraction>
+  <summary>从 4A 客户 Brief 提取需求</summary>
+  <p>粘贴包含主题、投放要求和监测约定的邮件正文，或上传 UTF-8 文本、DOCX。提取后核对字段再发起任务。</p>
+  <form method="post" action="/api/media-proposals/brief" enctype="multipart/form-data">
+    <label>Brief 邮件正文<textarea name="text" rows="5" placeholder="主题：上海商圈新品试饮&#10;行业：食品饮料&#10;投放预算：{{ budget }} 万元&#10;媒体形式：公交车身、地铁出入口&#10;投放周期：{{ crate::media::SHOWCASE_DATES }}"></textarea></label>
+    <label>Brief 附件<input type="file" name="file" accept=".txt,.docx"></label>
+    <div class="form-actions"><button type="submit" class="secondary">提取投放条件</button></div>
+  </form>
+  <div class="media-notice" data-brief-status role="status" hidden></div>
+</details>
+<section class="panel" aria-labelledby="media-plan-inputs">
+  <h2 id="media-plan-inputs">发起提案</h2>
+  <form method="post" action="/media-proposals/create" data-workspace-submit data-task-create>
+    <fieldset class="form-section">
+      <legend>投放条件</legend>
+      <div class="media-fields">
+      <label>主题行业<input type="text" name="industry" value="食品饮料" readonly></label>
+      <label>统一预算量级（万元）<input type="text" name="budget" value="{{ budget }}" readonly></label>
+      <label>投放媒体<input type="text" value="公交+地铁" readonly></label>
+      <input type="hidden" name="bus" value="1">
+      <input type="hidden" name="metro" value="1">
+      </div>
+    </fieldset>
+    <fieldset class="media-date-range" data-date-range>
+      <legend>投放档期</legend>
+      <div class="media-date-fields">
+        <div class="media-date-field">
+          <label for="proposal-starts">开始日期</label>
+          <div class="media-date-control">
+            <input id="proposal-starts" type="date" name="starts" min="{{ crate::media::SHOWCASE_START }}" max="{{ crate::media::SHOWCASE_END }}" value="{{ crate::media::SHOWCASE_START }}" required>
+            {# Calendar icons from Lucide. See assets/lucide/LICENSE. #}
+            <button class="media-calendar-button" type="button" aria-label="打开开始日期日历" data-date-picker hidden>
+              <svg class="ui-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M8 2v4m8-4v4M3 10h18m-13 5h.01M12 15h.01M16 15h.01M8 19h.01M12 19h.01M16 19h.01"/><rect x="3" y="4" width="18" height="18" rx="2"/></svg>
+            </button>
+          </div>
+        </div>
+        <span class="media-date-separator" aria-hidden="true">至</span>
+        <div class="media-date-field">
+          <label for="proposal-ends">结束日期</label>
+          <div class="media-date-control">
+            <input id="proposal-ends" type="date" name="ends" min="{{ crate::media::SHOWCASE_START }}" max="{{ crate::media::SHOWCASE_END }}" value="{{ crate::media::SHOWCASE_END }}" required>
+            <button class="media-calendar-button" type="button" aria-label="打开结束日期日历" data-date-picker hidden>
+              <svg class="ui-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M8 2v4m8-4v4M3 10h18m-13 5h.01M12 15h.01M16 15h.01M8 19h.01M12 19h.01M16 19h.01"/><rect x="3" y="4" width="18" height="18" rx="2"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="media-date-actions">
+        <p>默认投放档期为 2027 全年，可按客户需求调整。</p>
+        <button class="secondary" type="button" data-reset-dates hidden>恢复全年</button>
+      </div>
+      <p id="proposal-date-feedback" class="media-date-feedback" data-date-feedback role="status" hidden>结束日期不能早于开始日期。</p>
+    </fieldset>
+    <fieldset class="form-section">
+      <legend>客户附加要求</legend>
+      <div class="media-fields">
+        <label>必选公交线路<input type="text" name="required_routes" maxlength="130" placeholder="如 927路、95路"></label>
+        <label>预算硬上限（万元）<input type="number" name="hard_cap_wan" min="1" max="100000" step="1" placeholder="仅在客户明确限额时填写"></label>
+      </div>
+    </fieldset>
+    <details class="rolling-fields">
+      <summary>按月核验与调配</summary>
+      <p>默认 5 月预热、7 月主投、10 月回访，其余月份机动。实际采购逐段核对红豆库存、报价及客户指定线路。</p>
+      <label>各段调配依据（选填）<textarea name="scheduling_factors" rows="3" maxlength="600" placeholder="2027-07-01 | 3 | 门店暑期体验活动&#10;2027-09-01 | 1 | 已确认的商圈活动"></textarea></label>
+      <p>每行填写月初日期、权重 0–3 和原因。0 代表当月机动，1–3 影响预算分配。缺快照时，仍为该投放段留出预算。</p>
+    </details>
+    <details class="rolling-fields" data-brief-review>
+      <summary>客户假设书与目标圈</summary>
+      <p>填写脱敏的客户规模与目标。四项投放条件取自上方表单。</p>
+      <input type="hidden" name="brief_used" value="0">
+      <div class="media-fields">
+        <label>客户类型与规模<input type="text" name="brief_customer_profile" maxlength="150" placeholder="例如上海某区域饮料连锁，门店规模已核对"></label>
+        <label>生意目标<input type="text" name="brief_objective" maxlength="150"></label>
+        <label>Campaign 主目标<select name="brief_campaign_goal"><option value="">沿用示例或按需求确认</option><option value="到店">到店</option><option value="认知">认知</option><option value="促销">促销</option><option value="拉新">拉新</option></select></label>
+        <label>目标人群<input type="text" name="brief_audience" maxlength="150"></label>
+        <label>意向区域<input type="text" name="brief_region" maxlength="150"></label>
+        <label>成功衡量与监测约定<input type="text" name="brief_monitoring" maxlength="150"></label>
+      </div>
+      <label>新云查询中心（每行一个）<textarea name="target_centers" rows="3" maxlength="260" placeholder="上海市静安区南京西路789号&#10;上海市黄浦区新天地"></textarea></label>
+      <p>留空沿用默认五个商圈。填写后按 1,500 米半径查询所列地标。</p>
+      <label class="media-confirm"><input type="checkbox" name="brief_confirmed" value="1">已核对客户描述、投放条件和目标圈</label>
+    </details>
+    <details class="rolling-fields">
+      <summary>上下刊施工条件</summary>
+      <p>也可先生成待核草案，在任务详情补录。</p>
+      {% include "media-ops-fields.html" %}
+    </details>
+    <div class="form-actions">
+      <p>提交后按所选档期从新云和红豆取数。缺少库存的投放阶段会列为待核。</p>
+      <button type="submit">一键生成提案</button>
+    </div>
+  </form>
+</section>
+{% endblock %}
