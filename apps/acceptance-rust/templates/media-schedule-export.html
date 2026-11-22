@@ -13,24 +13,21 @@
     <section class="panel report-cover" aria-labelledby="summary">
       <div class="report-cover-head">
         <h1 id="summary">上海户外媒体投放提案</h1>
-        <p>上海新云传媒{% if !campaign.brief.objective.is_empty() %} · {{ campaign.brief.objective }}{% else if !campaign.brief.campaign_goal.is_empty() %} · 投放主目标 {{ campaign.brief.campaign_goal }}{% else if campaign.demo %} · {{ options.industry.campaign() }}{% endif %}</p>
+        {% if !campaign.brief.objective.is_empty() %}<p>{{ campaign.brief.objective }}</p>{% else if !campaign.brief.campaign_goal.is_empty() %}<p>投放主目标 {{ campaign.brief.campaign_goal }}</p>{% else if campaign.demo %}<p>{{ options.industry.campaign() }}</p>{% endif %}
         <!-- cityline-report-generated -->
       </div>
       {% if options.demo == Some(1) %}
       <p class="media-notice report-draft" data-demo-report><strong>合成样例 · 仅供演示</strong>。库存、报价和效果数据用于展示工作台流程。</p>
-      {% else if !plan.complete || !full_evidence || operations_incomplete || options.goal_needs_confirmation() %}
-      <p class="media-notice report-draft"><strong>投放条件说明</strong>。各档期的库存、报价与投放证据列于方案明细。</p>
       {% endif %}
       <h2 class="report-overview-title">报告数据一览</h2>
       <dl class="media-stats report-overview metric-strip">
         <div class="metric-tile"><dt>投放档期</dt><dd>{{ plan.placements[0].segment.window.starts }} 至 {{ plan.placements[plan.placements.len() - 1].segment.window.ends }}</dd></div>
-        <div class="metric-tile"><dt>整案预算量级</dt><dd>约 {{ budget }} 万元</dd><dd><small>报价参考 {{ crate::media::budget_band_label(budget) }}</small></dd></div>
+        <div class="metric-tile"><dt>整案预算量级</dt><dd>约 {{ budget }} 万元</dd></div>
         <div class="metric-tile"><dt>媒体范围</dt><dd>{{ campaign.media.label() }}</dd></div>
         {% if let Some(cap) = options.hard_cap %}<div class="metric-tile"><dt>客户预算硬上限</dt><dd>{{ crate::media::wan(cap) }} 万元</dd></div>{% endif %}
       </dl>
       <p class="report-caption"><a href="#calendar">查阅档期库存与报价</a></p>
       {% include "media-report-overview.html" %}
-      {% include "media-report-recommendation.html" %}
     </section>
     <section class="panel" id="campaign" aria-labelledby="brief-heading">
       <h2 id="brief-heading">品牌与投放目标</h2>
@@ -91,8 +88,8 @@
       {% if window.factor.weight > 0 %}
       <li><strong>{{ window.starts }} 至 {{ window.ends }}</strong>
         <p>{{ window.days }} 天 · {% if row.ready() %}条件已核{% else %}待核对{% endif %}</p>
-        <p>{{ window.factor.reason }} · 调配权重 {{ window.factor.weight }}</p>
-        <p>计划预算 {{ crate::media::wan(row.planned) }} 万元</p>
+        <p>{{ window.factor.reason }}</p>
+        <p>计划预算 {{ crate::media::wan(row.planned) }} 万元 · 占整案 {{ row.planned_share(budget) }}</p>
         {% if row.segment.snapshot.is_none() %}<small>缺少匹配库存，预算已预留。</small>{% endif %}
         {% if let Some(proposal) = row.proposal %}
         {% if !proposal.required_routes.is_empty() %}

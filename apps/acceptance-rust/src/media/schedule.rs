@@ -356,6 +356,12 @@ struct Placement<'a> {
 }
 
 impl Placement<'_> {
+    fn planned_share(&self, budget: &u32) -> String {
+        let ratio = self.planned as f64 / (f64::from(*budget) * 100.0);
+        let formatted = format!("{ratio:.1}");
+        format!("{}%", formatted.trim_end_matches(".0"))
+    }
+
     fn ready(&self) -> bool {
         self.segment.window.factor.weight == 0
             || self.proposal.as_ref().is_some_and(|proposal| {
@@ -373,7 +379,6 @@ pub(super) struct Calendar {
 pub(super) struct Plan<'a> {
     placements: Vec<Placement<'a>>,
     pub(super) total: Cost,
-    pub(super) complete: bool,
 }
 
 impl Plan<'_> {
@@ -743,12 +748,7 @@ impl Calendar {
                 low: sum.low + plan.total.low,
                 high: sum.high + plan.total.high,
             });
-        let complete = placements.iter().all(Placement::ready);
-        Plan {
-            placements,
-            total,
-            complete,
-        }
+        Plan { placements, total }
     }
     fn build_variant(
         plan: &Plan<'_>,
@@ -765,10 +765,7 @@ impl Calendar {
                 let mut period = Period::new(
                     &window.starts,
                     &window.ends,
-                    format!(
-                        "{} · 调配权重 {}",
-                        window.factor.reason, window.factor.weight
-                    ),
+                    window.factor.reason.clone(),
                     placement.limit,
                     placement
                         .segment
@@ -857,9 +854,6 @@ impl Calendar {
                 ));
             }
         }
-        let full_evidence = variants.iter().all(Variant::has_full_evidence);
-        let operations_incomplete =
-            options.requires_operations() && !variants.iter().all(Variant::operations_ready);
         let plan = self.plan(options, budget, portfolio, Strategy::CommerceCoverage);
         CalendarReport {
             options,
@@ -869,8 +863,6 @@ impl Calendar {
             plan: &plan,
             previous_budget,
             comparisons,
-            full_evidence,
-            operations_incomplete,
             css: web::CSS,
             guidance,
             variants,
@@ -890,8 +882,6 @@ struct CalendarReport<'a> {
     plan: &'a Plan<'a>,
     previous_budget: Option<u32>,
     comparisons: Vec<BudgetComparison>,
-    full_evidence: bool,
-    operations_incomplete: bool,
     css: &'static str,
     guidance: &'a [(&'a str, &'a str)],
     variants: Vec<Variant>,

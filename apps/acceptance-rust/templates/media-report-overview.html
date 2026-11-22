@@ -8,11 +8,11 @@
         <dd class="metric-value">{% if variant.total.high > 0 %}{{ crate::media::wan(variant.total.low) }}–{{ crate::media::wan(variant.total.high) }} <small class="metric-unit">万元</small>{% else %}待核对{% endif %}</dd>
       </div>
       {% for metric in variant.metrics %}
-      {% if metric.name == "组合曝光" %}
+      {% if metric.name == "组合曝光" && metric.known %}
       <div class="report-glance-reach">
         <dt>{{ metric.name }}</dt>
-        <dd>{% if metric.known %}{{ metric.total }} <small>人次</small>{% else %}{{ metric.status }}{% endif %}</dd>
-        {% if metric.known %}<dd class="report-caption">{{ metric.status }}{% if metric.baseline_months > 0 %} · 含 5 月基准{% endif %}</dd>{% endif %}
+        <dd>{{ metric.total }} <small>人次</small></dd>
+        <dd class="report-caption">{{ metric.status }}{% if metric.baseline_months > 0 %} · 含 5 月基准{% endif %}</dd>
       </div>
       {% endif %}
       {% endfor %}

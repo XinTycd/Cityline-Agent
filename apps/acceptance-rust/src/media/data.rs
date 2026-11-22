@@ -107,6 +107,7 @@ struct DataPage {
 
 async fn page(
     State(store): State<Store>,
+    Extension(refresh): Extension<Refresh>,
     Extension(user): Extension<User>,
     Query(filter): Query<Filter>,
 ) -> Result<Response, WebError> {
@@ -164,7 +165,8 @@ async fn page(
     };
     let pages = ListPages::new(page, &mut snapshots);
     let platform_issue = if batch.is_none() && source == "platform" {
-        Refresh::preflight(false, Selection::Both.id())
+        refresh
+            .preflight(false, Selection::Both.id())
             .err()
             .map(|(_, reason)| reason)
     } else {

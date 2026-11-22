@@ -17,6 +17,7 @@ if (-not $Executable) {
 $Executable = (Resolve-Path -LiteralPath $Executable).ProviderPath
 $secretFile = Join-Path $runtime 'secrets/b1x-media-key.dpapi'
 $redbeanClientFile = Join-Path $runtime 'secrets/redbean-oauth-client.dpapi'
+$redbeanPasswordFile = Join-Path $runtime 'secrets/redbean-platform-password.dpapi'
 $contestTariff = Join-Path $runtime 'contest/cityline-tariff.xlsx'
 $localConfig = Join-Path $workspace '.env.local'
 $localValues = @{}
@@ -62,6 +63,16 @@ try {
         $redbeanCredential = [pscredential]::new($env:CITYLINE_REDBEAN_OAUTH_CLIENT_ID, $redbeanSecret)
         $env:CITYLINE_REDBEAN_OAUTH_CLIENT_SECRET = $redbeanCredential.GetNetworkCredential().Password
     }
+    if (-not $env:CITYLINE_REDBEAN_PASSWORD -and $env:CITYLINE_REDBEAN_USERNAME -and
+        $env:CITYLINE_REDBEAN_USERNAME -ceq $localValues['CITYLINE_REDBEAN_USERNAME'] -and
+        $env:CITYLINE_REDBEAN_ORIGIN -ceq $localValues['CITYLINE_REDBEAN_ORIGIN'] -and
+        $env:CITYLINE_REDBEAN_OAUTH_ENDPOINT -ceq $localValues['CITYLINE_REDBEAN_OAUTH_ENDPOINT'] -and
+        $env:CITYLINE_REDBEAN_OAUTH_CLIENT_ID -ceq $localValues['CITYLINE_REDBEAN_OAUTH_CLIENT_ID'] -and
+        (Test-Path -LiteralPath $redbeanPasswordFile -PathType Leaf)) {
+        $redbeanPassword = Get-Content -LiteralPath $redbeanPasswordFile -ErrorAction Stop | ConvertTo-SecureString
+        $redbeanPlatformAccount = [pscredential]::new($env:CITYLINE_REDBEAN_USERNAME, $redbeanPassword)
+        $env:CITYLINE_REDBEAN_PASSWORD = $redbeanPlatformAccount.GetNetworkCredential().Password
+    }
     & $Executable
     if ($LASTEXITCODE -ne 0) {
         throw "城线服务退出，退出码 $LASTEXITCODE。"
@@ -72,6 +83,9 @@ try {
     }
     if ($redbeanCredential) {
         Remove-Item Env:CITYLINE_REDBEAN_OAUTH_CLIENT_SECRET -ErrorAction SilentlyContinue
+    }
+    if ($redbeanPlatformAccount) {
+        Remove-Item Env:CITYLINE_REDBEAN_PASSWORD -ErrorAction SilentlyContinue
     }
     foreach ($key in $loadedVariables) {
         [Environment]::SetEnvironmentVariable($key, $null, 'Process')

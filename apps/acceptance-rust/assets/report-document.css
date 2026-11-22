@@ -183,6 +183,9 @@
 .report-page .report-variant .report-variant-metrics { gap: 1px; }
 .report-page .report-variant .report-variant-metrics > div { background: var(--panel); }
 .report-page .report-variant .report-variant-metrics > div:first-child dd { color: var(--blue-strong); }
+.report-page .report-variant .media-stats:not(.report-variant-metrics) {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
 .report-page .report-route-map { margin: 0 auto; width: 100%; max-inline-size: 1160px; }
 .report-page .report-phase-maps .report-route-map { margin-block: 12px 16px; }
 .report-page .report-phase-maps .report-route-map:last-child { margin-block-end: 4px; }

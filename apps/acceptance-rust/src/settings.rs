@@ -127,7 +127,9 @@ struct SettingsPage {
     login: crate::auth::LoginConfig,
     callback_url: String,
     redbean_configured: bool,
+    redbean_stored: bool,
     redbean_authorized: bool,
+    redbean_issue: Option<&'static str>,
 }
 
 #[derive(Deserialize)]
@@ -156,11 +158,18 @@ async fn page(
         login: settings.auth.config(),
         callback_url: settings.auth.callback_url(),
         redbean_configured: refresh.redbean.configured(),
+        redbean_stored: refresh.redbean.uses_stored_account(),
         redbean_authorized: refresh.redbean.has_token(&user.identifier),
+        redbean_issue: refresh
+            .redbean
+            .check_stored_configuration()
+            .err()
+            .map(|(_, message)| message),
     })
 }
 
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
+#[serde(default)]
 struct RedbeanCredentials {
     username: String,
     password: String,
@@ -172,14 +181,23 @@ async fn authorize_redbean(
     Extension(user): Extension<User>,
     Form(credentials): Form<RedbeanCredentials>,
 ) -> Result<Redirect, WebError> {
-    let result = refresh
-        .redbean
-        .authorize(
-            &user.identifier,
-            &credentials.username,
-            &credentials.password,
-        )
-        .await;
+    let stored = refresh.redbean.uses_stored_account();
+    let result = if stored {
+        refresh
+            .redbean
+            .token_for_task(&user.identifier)
+            .await
+            .map(|_| ())
+    } else {
+        refresh
+            .redbean
+            .authorize(
+                &user.identifier,
+                &credentials.username,
+                &credentials.password,
+            )
+            .await
+    };
     audit::record(
         &settings.store,
         "平台",
@@ -189,7 +207,9 @@ async fn authorize_redbean(
             "红豆 OAuth 授权未完成"
         },
         None,
-        if result.is_ok() {
+        if result.is_ok() && stored {
+            "服务端预存账号已取得临时库存令牌。".into()
+        } else if result.is_ok() {
             "已取得当前操作员的临时库存令牌。".into()
         } else {
             "请核对红豆平台授权条件。".into()

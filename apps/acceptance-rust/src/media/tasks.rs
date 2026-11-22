@@ -60,7 +60,8 @@ const LABELS: [&str; 5] = ["需求接收", "数据核验", "提案策略", "组�
 const TASK_NAME_PREFIX: &str = "饮食食品";
 const TASK_COLUMNS: &str = "payload, active, review, review_note,
     (SELECT datetime(min(created_at), '+8 hours') FROM audit_events
-     WHERE task_id=media_tasks.id AND category='任务' AND action='创建') AS created_at";
+     WHERE task_id=media_tasks.id AND category='任务' AND action='创建') AS created_at,
+    report IS NOT NULL AS report_saved";
 const TASK_TABLE_COLUMNS: &str =
     "rowid AS sequence, datetime(updated_at, '+8 hours') AS updated_at";
 const FORMAL_REPORT: &str = "report IS NOT NULL
@@ -74,6 +75,7 @@ const APPROVAL_READY: &str = "json_extract(payload, '$.approval_readiness.a')=1
 mod agent_trace;
 mod evidence_review;
 mod overview;
+mod report_delivery;
 mod route_revision;
 mod schedule_revision;
 
@@ -93,9 +95,6 @@ impl TaskState {
     }
     fn done(self) -> bool {
         matches!(self, Self::Done)
-    }
-    fn report_visible(self) -> bool {
-        matches!(self, Self::Done | Self::Demo)
     }
 }
 
@@ -187,6 +186,8 @@ pub(super) struct Task {
     review: ReviewState,
     #[serde(skip)]
     review_note: String,
+    #[serde(skip)]
+    report_saved: bool,
     #[serde(skip)]
     created_at: Option<String>,
     #[serde(skip)]
@@ -353,6 +354,7 @@ impl Task {
             route_overviews: Vec::new(),
             approved_variant: None,
             review: ReviewState::Pending,
+            report_saved: false,
             review_note: String::new(),
             created_at: None,
             started: Some(Instant::now()),
@@ -449,6 +451,9 @@ impl Task {
     }
 
     pub(super) fn status(&self) -> &'static str {
+        if self.report_saved && !self.is_demo() {
+            return "已完成 · HTML 已生成";
+        }
         match self.state {
             TaskState::Active => "正在生成",
             TaskState::Demo => "已生成 · 合成样例",
@@ -500,6 +505,9 @@ impl Task {
     }
 
     fn list_status(&self) -> (&'static str, &'static str) {
+        if self.report_saved && !self.is_demo() {
+            return ("已完成", "success");
+        }
         match self.state {
             TaskState::Active => ("任务中", "info"),
             TaskState::Demo => ("演示样例", "info"),
@@ -757,6 +765,13 @@ fn decode(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
     task.review = ReviewState::parse(&row.get::<_, String>(2)?);
     task.review_note = row.get(3)?;
     task.created_at = row.get(4)?;
+    task.report_saved = row.get("report_saved")?;
+    if task.report_saved && matches!(task.steps[REPORT].state, StepState::Review) {
+        task.steps[REPORT].state = StepState::Done;
+        if let Some(note) = task.steps[REPORT].notes.last_mut() {
+            *note = "可交互 HTML 已生成，可以直接浏览。".into();
+        }
+    }
     if task.is_demo() && task.state.done() {
         task.state = TaskState::Demo;
         task.approved_variant = None;
@@ -791,6 +806,7 @@ async fn get_task(store: &Store, id: Uuid) -> Result<Task, WebError> {
 async fn save(store: &Store, task: &Task, report: Option<String>) -> Result<(), WebError> {
     let store = store.clone();
     let mut task = task.clone();
+    task.report_saved = report.is_some();
     if !task.state.active() {
         task.generation_ms = task
             .started
@@ -1282,10 +1298,12 @@ async fn create(
     if !brief.normalize() {
         return Err(invalid("Brief 补充说明每项最多 150 个字符。"));
     }
-    if !brief.campaign_goal.is_empty()
+    if (input.brief_used.is_some() || !brief.campaign_goal.is_empty())
         && super::brief::campaign_goal(&brief.campaign_goal).is_none()
     {
-        return Err(invalid("请选择到店、认知、促销或拉新作为主目标。"));
+        return Err(invalid(
+            "请先在客户假设书中选择到店、认知、促销或拉新作为主目标。",
+        ));
     }
     let target_centers = parse_target_centers(input.target_centers.as_deref().unwrap_or_default())
         .map_err(invalid)?;
@@ -2271,7 +2289,7 @@ async fn listing(
         let tx = db.transaction()?;
         let matched = format!(
             "{}, matched AS (
-             SELECT payload, active, review, review_note, created_at, sequence, updated_at FROM tasks
+             SELECT payload, active, review, review_note, created_at, report_saved, sequence, updated_at FROM tasks
              WHERE CASE ?1
                  WHEN 'all' THEN 1
                  WHEN 'active' THEN active=1
@@ -2333,13 +2351,14 @@ async fn progress(
         })
         .collect::<Vec<_>>();
     Ok(Json(json!({
-        "state": task.state,
+        "state": if task.report_saved && !task.is_demo() { TaskState::Done } else { task.state },
         "status": task.status(),
         "summary": task.summary(),
         "approved_variant": task.approved_variant,
         "approval_readiness": task.approval_readiness,
         "offer_review": user.admin && task.ready_for_review(),
-        "offer_report": task.can_publish_report(),
+        "offer_report": task.report_saved,
+        "offer_formal_delivery": task.can_publish_report() && !task.is_demo(),
         "budget_confirmation_required": task.budget_confirmation_required(),
         "approval_inventory_issue": task.approval_inventory_issue,
         "approval_inventory_review": task.approval_inventory_review,
@@ -2426,9 +2445,7 @@ async fn report(
         return Err((StatusCode::FORBIDDEN, "内部核验副本仅供管理员查阅。"));
     }
     let approved = task.confirmed_delivery();
-    if (options.delivery == Some(1) && (approved.is_none() || !task.platform_report_data))
-        || (!workpaper && !task.can_publish_report())
-    {
+    if options.delivery == Some(1) && (approved.is_none() || !task.platform_report_data) {
         return Err((
             StatusCode::CONFLICT,
             "正式报告需两案均取得完整的平台数据，并通过库存复核和人工确认。请查看任务核验清单。",
@@ -2452,7 +2469,7 @@ async fn report(
         }
         _ => html,
     };
-    if !workpaper && !task.is_demo() && report_has_open_items(&html) {
+    if options.delivery == Some(1) && report_has_open_items(&html) {
         return Err((
             StatusCode::CONFLICT,
             "报告仍有未完成项，请核对后生成新版本。",
@@ -2501,6 +2518,8 @@ async fn report(
             ),
             1,
         )
+    } else if !task.is_demo() && options.delivery != Some(1) {
+        report_delivery::for_browsing(html)
     } else {
         html
     };
@@ -2511,12 +2530,10 @@ async fn report(
         task.options.media.unwrap_or(Selection::Both),
         task.budget(),
         task.options.starts.as_deref().unwrap_or("2027"),
-        if task.is_demo() {
-            ReportFile::Demo
-        } else if approved.is_some() {
+        if approved.is_some() {
             ReportFile::Confirmed
         } else {
-            ReportFile::Draft
+            ReportFile::Standard
         },
     )
 }
@@ -3105,16 +3122,22 @@ async fn collect_platform(
         StepState::Running,
         if proof_only {
             format!("共 {count} 段已锁定采购档期，正在打开新云平台的官方登录窗口。")
+        } else if refresh.redbean.uses_stored_account() {
+            format!("共 {count} 段采购档期，工作台正在验证红豆预存账号和新云授权。")
         } else {
             format!("共 {count} 段采购档期，正在打开数据平台的官方登录窗口。")
         },
     );
     save(store, task, None).await?;
-    let id = match refresh.launch(request, actor) {
+    let id = match refresh.launch(request, actor).await {
         Ok(id) => id,
         Err((_, message)) if proof_only => {
             record_evidence_refresh(store, task, "error_launch", message, 0).await?;
             return Ok(PlatformCollection::Continue(None));
+        }
+        Err((_, message)) if refresh.redbean.uses_stored_account() => {
+            platform_review(store, task, "error_preflight", message).await?;
+            return Ok(PlatformCollection::Stopped);
         }
         Err((_, message)) => {
             platform_review(store, task, "error_launch", message).await?;
@@ -3157,15 +3180,13 @@ async fn collect_platform(
         }
         if redbean {
             task.login.redbean = true;
-            task.note(DATA, StepState::Running, "红豆平台登录已确认。");
-            audit::record(
-                store,
-                "平台",
-                "红豆连接成功",
-                Some(task.id),
-                "已确认官方平台登录。".into(),
-            )
-            .await?;
+            let message = if refresh.redbean.uses_stored_account() {
+                "红豆预存账号已自动通过库存权限校验。"
+            } else {
+                "红豆平台登录已确认。"
+            };
+            task.note(DATA, StepState::Running, message);
+            audit::record(store, "平台", "红豆连接成功", Some(task.id), message.into()).await?;
         }
         let evidence = status
             .evidence
@@ -3214,6 +3235,11 @@ async fn collect_platform(
             if let Some(message) = match state {
                 "login" if task.login.phase == "opening" && proof_only => {
                     Some("正在验证新云授权。若出现 Edge 登录页，请在该页面完成认证。")
+                }
+                "login"
+                    if task.login.phase == "opening" && refresh.redbean.uses_stored_account() =>
+                {
+                    Some("红豆使用服务端预存账号。若 Edge 打开新云登录页，请完成新云认证。")
                 }
                 "login" if task.login.phase == "opening" => {
                     Some("正在核验两平台授权。若出现 Edge 登录页，请在对应页面完成认证。")
@@ -3334,6 +3360,9 @@ async fn collect_platform(
             (false, false) => "新云平台和红豆平台均未完成认证，可重新获取数据并完成认证。",
             (true, true) => "两平台已通过认证，认证后获取数据超时。可重新获取数据或使用本地快照。",
         },
+        "error_redbean_auth" if refresh.redbean.uses_stored_account() => {
+            "红豆拒绝预存账号的库存请求。请核对服务端账号权限后重试。"
+        }
         "error_redbean_auth" => {
             "红豆平台拒绝本次库存请求。请重新认证并核对所选媒体和档期的查询权限。"
         }
@@ -3819,7 +3848,7 @@ async fn execute(
         };
         if !task.options.proof_only
             && let Err((_, reason)) =
-                Refresh::preflight(false, task.options.media.unwrap_or(Selection::Both).id())
+                refresh.preflight(false, task.options.media.unwrap_or(Selection::Both).id())
         {
             platform_review(store, task, "error_preflight", reason).await?;
             return Ok(());
@@ -4318,8 +4347,8 @@ async fn execute(
     if conditions_incomplete || !readiness.complete() {
         task.note(
             REPORT,
-            StepState::Review,
-            "A／B 已核算。正式报告未发布，请查看任务核验清单。",
+            StepState::Done,
+            "可交互 HTML 已生成，可以直接浏览。",
         );
         task.state = TaskState::Review;
         task.has_alternative = true;
@@ -4328,16 +4357,8 @@ async fn execute(
     task.approval_quotes = Some(approval_quotes);
     task.note(
         REPORT,
-        if review.output.is_some() {
-            StepState::Done
-        } else {
-            StepState::Fallback
-        },
-        if task.platform_report_data {
-            "可交互 HTML 已渲染并保存。人工确认后开放正式报告。"
-        } else {
-            "可交互 HTML 已渲染并保存为内部核验副本。正式报告须使用平台原始数据。"
-        },
+        StepState::Done,
+        "可交互 HTML 已生成，可以直接浏览。",
     );
     task.state = TaskState::Done;
     save(store, task, Some(html)).await

@@ -31,6 +31,7 @@ const savedCloudSession = process.env.CITYLINE_NEWCLOUD_SESSION;
 const cachedCloudSession = process.env.CITYLINE_NEWCLOUD_REUSED === '1';
 const savedRedToken = process.env.CITYLINE_REDBEAN_ACCESS_TOKEN;
 const savedRedTenant = process.env.CITYLINE_REDBEAN_TENANT_ID || '1';
+const fixedRedAccount = process.env.CITYLINE_REDBEAN_FIXED_ACCOUNT === '1';
 delete process.env.CITYLINE_MEDIA_IMPORT_TOKEN;
 delete process.env.CITYLINE_NEWCLOUD_SESSION;
 delete process.env.CITYLINE_NEWCLOUD_REUSED;
@@ -132,16 +133,21 @@ async function sessions() {
     try {
       client = redClient(token, tenant);
       await client.authorize(dates, media);
-    } catch {
-      const error = new Error('Redbean did not confirm inventory access');
-      error.platformStage = 'redbean_auth';
+    } catch (error) {
+      error.platformStage = !client || sessionRejected(error) ? 'redbean_auth' : 'inventory';
       throw error;
     }
     return mark('redbean', client);
   };
+  const redSession = !proofOnly && (savedRedToken || fixedRedAccount)
+    ? verifyRed(savedRedToken, savedRedTenant)
+    : null;
   const [verifiedCloud, verifiedRed] = await Promise.all([
     verifiedCloudSession(),
-    !proofOnly && savedRedToken ? verifyRed(savedRedToken, savedRedTenant).catch(() => null) : null,
+    fixedRedAccount ? redSession : redSession?.catch((error) => {
+      if (error.platformStage === 'inventory') throw error;
+      return null;
+    }) ?? null,
   ]);
   if (verifiedCloud && (proofOnly || verifiedRed)) {
     return [verifiedCloud.client, verifiedRed, verifiedCloud.coverage];
@@ -168,48 +174,47 @@ async function sessions() {
   phase = 'login';
   await status('login');
 
-  const [cloud, red] = await Promise.all([
-    newcloud ? (async () => {
-      await openLogin(newcloud, cloudLogin, 'newcloud');
-      await newcloud.bringToFront();
-      await newcloud.waitForFunction(
-        ({ origin, landing, marker }) => location.origin === origin && location.pathname === landing
-          && document.getElementById(marker)?.textContent.includes('媒体覆盖分析'),
-        { origin: cloudOrigin, landing: cloudPath('LANDING'), marker: process.env.CITYLINE_NEWCLOUD_READY_MARKER },
-        { timeout: 240000 },
-      );
-      const cookies = await context.cookies(cloudOrigin);
-      const session = cookies.map(({ name, value }) => name + '=' + value).join('; ');
-      const verified = await verifyCloud(session);
-      const expires = cookies.filter(cookie => cookie.expires > 0).map(cookie => cookie.expires);
-      const remaining = expires.length > 0 ? Math.max(0, Math.floor(Math.min(...expires) - Date.now() / 1000)) : undefined;
-      newcloudCached = await updateCloudCache(session, remaining);
-      return verified;
-    })() : verifiedCloud,
-    proofOnly ? null : (async () => {
-      if (verifiedRed) return verifiedRed;
-      const redbean = await context.newPage();
-      await openLogin(redbean, redOrigin + redPath('LOGIN'), 'redbean');
-      if (savedRedToken) {
-        redbeanFallback = true;
-        await status('login');
-      }
-      if (!newcloud || authenticated.newcloud) await redbean.bringToFront();
-      await redbean.waitForFunction((origin) => {
-        if (location.origin !== origin || /\/login\/?$/u.test(location.pathname)) return false;
-        return Boolean(localStorage.getItem('ACCESS_TOKEN') && localStorage.getItem('tenantId'));
-      }, redOrigin, { timeout: 240000 });
-      const result = await redbean.evaluate((origin) => {
-        if (location.origin !== origin) return null;
-        const read = (key) => {
-          const item = JSON.parse(localStorage.getItem(key));
-          return item?.e > Date.now() ? JSON.parse(item.v) : null;
-        };
-        return { token: read('ACCESS_TOKEN'), tenant: String(read('tenantId') ?? '') };
-      }, redOrigin);
-      return verifyRed(result?.token, result?.tenant);
-    })(),
-  ]);
+  // Start each interactive login timer after its page is foregrounded.
+  let cloud = verifiedCloud;
+  if (newcloud) {
+    await openLogin(newcloud, cloudLogin, 'newcloud');
+    await newcloud.bringToFront();
+    await newcloud.waitForFunction(
+      ({ origin, landing, marker }) => location.origin === origin && location.pathname === landing
+        && document.getElementById(marker)?.textContent.includes('媒体覆盖分析'),
+      { origin: cloudOrigin, landing: cloudPath('LANDING'), marker: process.env.CITYLINE_NEWCLOUD_READY_MARKER },
+      { timeout: 240000 },
+    );
+    const cookies = await context.cookies(cloudOrigin);
+    const session = cookies.map(({ name, value }) => name + '=' + value).join('; ');
+    cloud = await verifyCloud(session);
+    const expires = cookies.filter(cookie => cookie.expires > 0).map(cookie => cookie.expires);
+    const remaining = expires.length > 0 ? Math.max(0, Math.floor(Math.min(...expires) - Date.now() / 1000)) : undefined;
+    newcloudCached = await updateCloudCache(session, remaining);
+  }
+  let red = verifiedRed;
+  if (!proofOnly && !red) {
+    const redbean = await context.newPage();
+    await openLogin(redbean, redOrigin + redPath('LOGIN'), 'redbean');
+    if (savedRedToken) {
+      redbeanFallback = true;
+      await status('login');
+    }
+    await redbean.bringToFront();
+    await redbean.waitForFunction((origin) => {
+      if (location.origin !== origin || /\/login\/?$/u.test(location.pathname)) return false;
+      return Boolean(localStorage.getItem('ACCESS_TOKEN') && localStorage.getItem('tenantId'));
+    }, redOrigin, { timeout: 240000 });
+    const result = await redbean.evaluate((origin) => {
+      if (location.origin !== origin) return null;
+      const read = (key) => {
+        const item = JSON.parse(localStorage.getItem(key));
+        return item?.e > Date.now() ? JSON.parse(item.v) : null;
+      };
+      return { token: read('ACCESS_TOKEN'), tenant: String(read('tenantId') ?? '') };
+    }, redOrigin);
+    red = await verifyRed(result?.token, result?.tenant);
+  }
   return [cloud.client, red, cloud.coverage];
 }
 

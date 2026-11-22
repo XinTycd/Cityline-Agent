@@ -112,18 +112,20 @@
         </li>{% endfor %}
       </ul>
     </details>
+    {% if variant.has_exposure_metrics() %}
     <h4>曝光量估算</h4>
     <dl class="media-stats">
       {% for metric in variant.metrics %}
+      {% if metric.known %}
       <div><dt>{{ metric.name }} · {{ metric.status }}</dt>
-        {% if metric.known %}<dd>{{ metric.total }} 人次</dd>{% endif %}
+        <dd>{{ metric.total }} 人次</dd>
         {% if !metric.daily.is_empty() %}<dd class="report-metric-detail">日均 {{ metric.daily }} 人次</dd>{% endif %}
         {% if metric.baseline_months > 0 %}<dd class="report-metric-detail">{{ metric.baseline_months }} 个资源月份采用 2023 年 5 月历史基准</dd>{% endif %}
-        {% if metric.missing > 0 %}<dd class="report-metric-detail">{{ metric.missing }} 个档期资源项待补单位日触达</dd>{% endif %}
-        {% if metric.historical > 0 %}<dd class="report-metric-detail">{{ metric.historical }} 个档期资源项已有历史标签日均值</dd>{% endif %}
       </div>
+      {% endif %}
       {% endfor %}
     </dl>
+    {% endif %}
     </div>
     <div class="report-variant-group">
     <h4>采购与触达明细</h4>
@@ -131,10 +133,12 @@
     <details class="report-evidence">
       <summary>{{ period.starts }} 至 {{ period.ends }} · {{ period.days }} 天</summary>
       <p>{{ period.reason }} · 本段测算额度 {{ crate::media::wan(period.limit) }} 万元 · 已排资源 ¥{{ period.total.low }}–{{ period.total.high }}。</p>
-      {% if !period.rows.is_empty() %}
+      {% if period.has_exposure_metrics() %}
       <dl class="report-period-exposure" aria-label="本档期曝光估算">
         {% for metric in period.exposure_metrics() %}
-        <div><dt>{{ metric.name }}</dt><dd>{% if metric.known %}<strong>{{ metric.total }} 人次</strong> · {% endif %}{{ metric.status }}{% if metric.baseline_months > 0 %} · 含 5 月基准{% endif %}</dd></div>
+        {% if metric.known %}
+        <div><dt>{{ metric.name }}</dt><dd><strong>{{ metric.total }} 人次</strong> · {{ metric.status }}{% if metric.baseline_months > 0 %} · 含 5 月基准{% endif %}</dd></div>
+        {% endif %}
         {% endfor %}
       </dl>
       {% endif %}

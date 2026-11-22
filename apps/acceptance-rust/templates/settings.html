@@ -124,11 +124,20 @@
 <section class="panel settings-panel" aria-labelledby="redbean-settings">
   <header class="settings-panel-header">
     <div><h2 id="redbean-settings">红豆库存授权</h2><p>用于查询公交和地铁广告的档期库存。</p></div>
-    {% if redbean_authorized %}<span class="badge" data-tone="success">已授权</span>
+    {% if redbean_issue.is_some() %}<span class="badge" data-tone="warning">配置不完整</span>
+    {% else if redbean_authorized %}<span class="badge" data-tone="success">已授权</span>
+    {% else if redbean_stored %}<span class="badge" data-tone="neutral">自动授权</span>
     {% else if redbean_configured %}<span class="badge" data-tone="warning">待授权</span>
     {% else %}<span class="badge" data-tone="neutral">服务端未配置</span>{% endif %}
   </header>
-  {% if redbean_configured %}
+  {% if let Some(issue) = redbean_issue %}
+  <p class="settings-message">{{ issue }} 请在部署环境补齐后重启服务。</p>
+  {% else if redbean_stored %}
+  <form method="post" action="/settings/redbean" class="settings-form" data-workspace-submit>
+    <p>红豆固定使用服务端预存账号。创建平台任务和确认方案时会自动获取或续期授权。新云平台单独认证。</p>
+    <div class="form-actions"><button type="submit" class="secondary">验证预存授权</button></div>
+  </form>
+  {% else if redbean_configured %}
   {% if redbean_authorized %}
   <form method="post" action="/settings/redbean/clear" class="settings-form" data-workspace-submit>
     <p>临时授权有效期间，后续任务可直接查询红豆库存。新云平台单独认证。</p>

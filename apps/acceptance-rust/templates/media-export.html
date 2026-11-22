@@ -20,20 +20,15 @@
     <p class="media-notice report-draft" data-demo-report><strong>合成样例 · 仅供演示</strong>。库存、报价和效果数据用于展示工作台流程。</p>
     {% else if guidance.is_empty() %}
     <p class="media-notice report-draft"><strong>库存快照预览</strong>。本页展示所选快照的采购组合与报价。</p>
-    {% else if !result.proposal.complete_required() || !result.proposal.complete_media %}
-    <p class="media-notice report-draft"><strong>媒介与档期条件</strong>。当前组合无法满足全部必选线路或媒体要求。{% if !result.proposal.required_routes.is_empty() %}<a href="#required-routes">查看必选线路核验</a>{% else %}<a href="#proposal-variants">查看方案 A／B</a>{% endif %}</p>
-    {% else if !full_evidence %}
-    <p class="media-notice report-draft"><strong>投放证据说明</strong>。各案所用的线路、点位和触达依据见方案明细。</p>
     {% endif %}
     <h2 class="report-overview-title">报告数据一览</h2>
     <dl class="media-stats report-overview metric-strip">
-      <div class="metric-tile"><dt>客户预算量级</dt><dd>约 {{ page.budget }} 万元</dd><dd><small>报价参考 {{ crate::media::budget_band_label(page.budget) }}</small></dd></div>
+      <div class="metric-tile"><dt>客户预算量级</dt><dd>约 {{ page.budget }} 万元</dd></div>
       <div class="metric-tile"><dt>媒体范围</dt><dd class="report-media-label">{{ page.media.label() }}</dd></div>
       <div class="metric-tile"><dt>投放档期</dt><dd class="report-dates"><span>{{ result.snapshot.starts }}</span><span>至 {{ result.snapshot.ends }}</span></dd></div>
     </dl>
     <p class="report-caption"><a href="#purchase-detail">查阅档期库存与报价</a></p>
     {% include "media-report-overview.html" %}
-    {% include "media-report-recommendation.html" %}
     </section>
     <section class="panel" id="brand-understanding" aria-labelledby="brief-heading">
       <h2 id="brief-heading">品牌与投放目标</h2>
@@ -42,16 +37,6 @@
       <p><a href="#measurement">查看监测与验收约定</a></p>
     </section>
     {% include "media-variants.html" %}
-    <details class="panel report-supporting-data" id="media-operator">
-      <summary>公司简介</summary>
-      <p>上海新云传媒成立于 1997 年，运营覆盖城市核心商圈及公交、地铁等出行场景的户外媒体。</p>
-      <dl class="media-stats report-network">
-        <div><dt>公交车身运营规模</dt><dd>近 5,000 台</dd></div>
-        <div><dt>地铁出入口点位</dt><dd>近 1,000 个</dd></div>
-        <div><dt>商圈媒体面积</dt><dd>近 10,000 平方米</dd></div>
-      </dl>
-      <p class="report-caption">来源为赛题资料包「00 企业介绍」。此处展示运营规模，具体可售资源见本案排期与明细。</p>
-    </details>
     {% let view = result %}
     {% let industry = page.industry %}
     {% let budget = page.budget %}

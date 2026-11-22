@@ -702,6 +702,10 @@ impl Variant {
         }
     }
 
+    pub(super) fn has_exposure_metrics(&self) -> bool {
+        self.metrics.iter().any(|metric| metric.known)
+    }
+
     pub(super) fn has_full_evidence(&self) -> bool {
         self.available
             && self.bus_map_ready()
@@ -860,6 +864,10 @@ impl Alternative {
 }
 
 impl Period {
+    pub(super) fn has_exposure_metrics(&self) -> bool {
+        self.rows.iter().any(|row| !row.evidence.is_empty())
+    }
+
     pub(super) fn exposure_metrics(&self) -> Vec<Metric> {
         metrics(std::slice::from_ref(self))
     }
@@ -1132,7 +1140,6 @@ pub(super) struct Metric {
     pub(super) total: String,
     pub(super) daily: String,
     pub(super) missing: usize,
-    pub(super) historical: usize,
     pub(super) baseline_months: usize,
 }
 
@@ -1151,26 +1158,16 @@ fn metrics(periods: &[Period]) -> Vec<Metric> {
             .flat_map(|period| &period.rows)
             .filter(|row| media.is_none_or(|media| media == row.media))
             .collect::<Vec<_>>();
-        let tracked = rows.iter().filter(|row| !row.evidence.is_empty()).count();
+        let known = rows.iter().any(|row| !row.evidence.is_empty());
         let missing = rows.iter().filter(|row| !row.reach_complete()).count();
-        let historical = rows
-            .iter()
-            .filter(|row| !row.historical_reach.is_empty())
-            .count();
         let baseline_months = rows
             .iter()
             .flat_map(|row| &row.evidence)
             .filter(|observation| observation.row.month != observation.applies_to)
             .count();
         let sum: u64 = rows.iter().map(|row| row.exposures).sum();
-        let complete = !incomplete_schedule && missing == 0 && !rows.is_empty();
-        let status = if rows.is_empty() && !incomplete_schedule {
-            "本方案无此类投放"
-        } else if tracked == 0 && historical > 0 {
-            "仅有历史标签人流"
-        } else if tracked == 0 {
-            "待补新云触达数据"
-        } else if complete {
+        let complete = known && !incomplete_schedule && missing == 0;
+        let status = if complete {
             "完整估算"
         } else {
             "部分可核验人次"
@@ -1178,7 +1175,7 @@ fn metrics(periods: &[Period]) -> Vec<Metric> {
         Metric {
             name,
             status,
-            known: tracked > 0,
+            known,
             total: format_count(&sum),
             daily: if complete {
                 format_count(&((sum + days / 2) / days))
@@ -1186,7 +1183,6 @@ fn metrics(periods: &[Period]) -> Vec<Metric> {
                 String::new()
             },
             missing,
-            historical,
             baseline_months,
         }
     })

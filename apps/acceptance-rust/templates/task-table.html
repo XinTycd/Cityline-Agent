@@ -12,6 +12,13 @@
         <td>
           {% let (status, tone) = task.list_status() %}
           <span class="badge task-status" data-status="{{ status }}" data-tone="{{ tone }}">{{ status }}</span>
+          {% if task.report_saved && !task.is_demo() %}
+          {% if task.review.key() == "returned" %}
+          <span class="badge task-status" data-status="已退回" data-tone="error">已退回</span>
+          {% else if task.approval_inventory_issue.is_some() %}
+          <span class="badge task-status" data-status="库存复核待处理" data-tone="info">库存复核待处理</span>
+          {% endif %}
+          {% endif %}
           {% if let Some(step) = task.running_step() %}<small>{{ step }}</small>{% endif %}
           {% if task.agent_error && !task.state.active() && !task.is_demo() %}
           <a class="badge" data-tone="warning" href="/media-proposals/tasks/{{ task.id }}/agent-trace">Agent 已回退</a>

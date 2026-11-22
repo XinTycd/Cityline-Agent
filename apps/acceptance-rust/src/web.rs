@@ -8,7 +8,9 @@ use axum::{
     routing::get,
 };
 use base64::{Engine as _, engine::general_purpose::STANDARD};
+use regex::Regex;
 use sha2::{Digest, Sha256};
+use std::sync::LazyLock;
 
 use crate::{
     agents::Agents,
@@ -64,7 +66,44 @@ pub(crate) fn report_clock(db: &rusqlite::Connection) -> rusqlite::Result<String
 }
 
 pub(crate) fn report_response(mut html: String) -> Response {
+    static LEGACY_REPORT_CALLOUTS: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(concat!(
+            r#"(?s)<p class="report-recommendation">.*?</p>"#,
+            r#"|<p class="media-notice report-draft">\s*<strong>(?:投放条件说明|媒介与档期条件|投放证据说明)</strong>.*?</p>"#,
+            r#"|<dd><small>报价参考\s+[^<]*</small></dd>"#,
+            r#"|<div class="report-glance-reach">\s*<dt>组合曝光</dt>\s*<dd>[^<]*</dd>\s*</div>"#,
+            r#"|<div><dt>[^<]* · (?:本方案无此类投放|仅有历史标签人流|待补新云触达数据|暂无可用于估算的单位触达)</dt>\s*(?:<dd[^>]*>[^<]*</dd>\s*)*</div>"#,
+            r#"|<div><dt>[^<]*</dt><dd>(?:本方案无此类投放|仅有历史标签人流|待补新云触达数据|暂无可用于估算的单位触达)</dd></div>"#,
+            r#"|<dd class="report-metric-detail">\d+ 个档期资源项(?:已有历史标签日均值|待补单位日触达)</dd>"#,
+            r#"|<p>上海新云传媒</p>|上海新云传媒(?:\s*·\s*)?"#,
+        ))
+        .expect("legacy report presentation markup")
+    });
+    if let std::borrow::Cow::Owned(clean) = LEGACY_REPORT_CALLOUTS.replace_all(&html, "") {
+        static EMPTY_EXPOSURE: LazyLock<Regex> = LazyLock::new(|| {
+            Regex::new(concat!(
+                r#"<h4>曝光量估算</h4>\s*<dl class="media-stats">\s*</dl>"#,
+                r#"|<dl class="report-period-exposure" aria-label="本档期曝光估算">\s*</dl>"#,
+            ))
+            .expect("legacy exposure markup")
+        });
+        html = match EMPTY_EXPOSURE.replace_all(&clean, "") {
+            std::borrow::Cow::Borrowed(_) => clean,
+            std::borrow::Cow::Owned(clean) => clean,
+        };
+    }
     const META: &str = "<meta http-equiv=\"Content-Security-Policy\" content=\"";
+    const LEGACY_OPERATOR: &str =
+        r#"<details class="panel report-supporting-data" id="media-operator">"#;
+    const LEGACY_OPERATOR_LINK: &str = r##"<a href="#media-operator">公司简介</a>"##;
+    if let Some(start) = html.find(LEGACY_OPERATOR)
+        && let Some(end) = html[start..].find("</details>")
+    {
+        html.replace_range(start..start + end + "</details>".len(), "");
+    }
+    if let Some(start) = html.find(LEGACY_OPERATOR_LINK) {
+        html.replace_range(start..start + LEGACY_OPERATOR_LINK.len(), "");
+    }
     const LEGACY_TASK_TONES: [&str; 3] = [
         r#", .task-status[data-status="已完成"]"#,
         r#", .task-status:is([data-status="待审核"], [data-status="待核对"])"#,

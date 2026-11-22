@@ -378,7 +378,6 @@ struct Export<'a> {
     brand: &'a Brand,
     coverage: Vec<ReportCoverage<'a>>,
     variants: Vec<visuals::Variant>,
-    full_evidence: bool,
     campaign: brief::CampaignView<'a>,
 }
 
@@ -892,7 +891,7 @@ async fn export(
         page.budget,
         &result.snapshot.starts,
         if result.snapshot.data.demo {
-            ReportFile::Demo
+            ReportFile::Standard
         } else {
             ReportFile::Draft
         },
@@ -1079,7 +1078,6 @@ fn render_export(
         })
         .take(12)
         .collect();
-    let full_evidence = variants.iter().all(visuals::Variant::has_full_evidence);
     Export {
         page,
         result,
@@ -1088,7 +1086,6 @@ fn render_export(
         brand,
         coverage,
         variants,
-        full_evidence,
         campaign: brief::CampaignView::new(options),
     }
     .render()
@@ -1096,7 +1093,7 @@ fn render_export(
 }
 
 enum ReportFile {
-    Demo,
+    Standard,
     Draft,
     Confirmed,
 }
@@ -1113,7 +1110,7 @@ fn export_response(
     let mut response = crate::web::report_response(html);
     if !preview {
         let status = match file {
-            ReportFile::Demo => "",
+            ReportFile::Standard => "",
             ReportFile::Draft => "draft-",
             ReportFile::Confirmed => "confirmed-",
         };

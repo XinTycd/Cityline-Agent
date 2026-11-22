@@ -74,21 +74,20 @@
     {% if !task.options.proof_only %}<span>红豆平台 <span data-auth-result="redbean">{% if task.login.redbean %}已确认{% else %}未确认{% endif %}</span>。</span>{% endif %}
     请查看数据核验记录，可用原条件重新获取数据或按同档期快照继续。
   </p>
-  <div class="task-result-actions" data-task-ready{% if !task.state.report_visible() %} hidden{% endif %}>
+  <div class="task-result-actions" data-task-ready{% if !task.report_saved %} hidden{% endif %}>
     <div class="result-header section-toolbar">
       <span class="badge">
         {% if task.is_demo() %}仅供演示
-        {% else if task.legacy_pending_review() || (task.review.key() == "approved" && task.confirmed_delivery().is_none()) %}历史报告 · 待复核证据
-        {% else if task.approval_inventory_issue.is_some() %}库存复核待处理
-        {% else %}{{ task.review.label() }}{% if let Some(choice) = task.confirmed_delivery() %} · 采用方案 {{ choice.code() }}{% endif %}
+        {% else %}HTML 已生成{% if let Some(choice) = task.confirmed_delivery() %} · 采用方案 {{ choice.code() }}{% endif %}
         {% endif %}
       </span>
-      <div class="action-group" data-task-report-links{% if !task.can_publish_report() %} hidden{% endif %}>
+      <div class="action-group" data-task-report-links{% if !task.report_saved %} hidden{% endif %}>
         <a class="button" href="/media-proposals/tasks/{{ task.id }}/report?preview=1" target="_blank" rel="noopener">打开独立 HTML</a>
         {% if task.is_demo() %}
         <a class="button secondary" href="/media-proposals/tasks/{{ task.id }}/report" download>导出演示 HTML</a>
         {% else %}
-        <a class="button secondary" href="/media-proposals/tasks/{{ task.id }}/report?delivery=1" download>导出已确认方案 HTML</a>
+        <a class="button secondary" href="/media-proposals/tasks/{{ task.id }}/report" download>下载 HTML</a>
+        <a class="button secondary" data-formal-delivery href="/media-proposals/tasks/{{ task.id }}/report?delivery=1" download{% if !task.can_publish_report() %} hidden{% endif %}>导出已确认方案 HTML</a>
         {% endif %}
       </div>
     </div>
@@ -133,9 +132,12 @@
       <p>审核意见 · {{ task.review_note }}</p>
     {% endif %}
   </div>
-  <p class="media-notice" data-task-blocked{% if task.state.active() || task.can_publish_report() %} hidden{% endif %}>
-    正式报告将在平台数据齐备并通过人工确认后开放。 <a data-publication-checklist href="/media-proposals/tasks/{{ task.id }}/evidence?scope=publication"{% if !task.can_refresh_evidence() %} hidden{% endif %}>查看正式报告核验</a>
+  <p class="media-notice" data-task-blocked{% if task.state.active() || task.report_saved %} hidden{% endif %}>
+    本次任务没有生成 HTML。请查看执行进度。
   </p>
+  <div class="action-group" data-publication-checklist{% if !task.can_refresh_evidence() %} hidden{% endif %}>
+    <a class="button secondary" href="/media-proposals/tasks/{{ task.id }}/evidence?scope=publication">查看数据与执行条件</a>
+  </div>
   <div class="action-group" data-route-replacement{% if !task.can_replace_route() %} hidden{% endif %}>
     <a class="button secondary" href="/media-proposals/tasks/{{ task.id }}/replacements">复核必选线路与备选</a>
   </div>

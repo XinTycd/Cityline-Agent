@@ -20,6 +20,8 @@ assert.match(home, /从 4A 客户 Brief 提取需求/u);
 assert.match(home, /食品饮料行业 · 上海商圈到店提案/u);
 assert.match(home, /180–250 万元/u);
 assert.match(home, /data-fill-campaign-case/u);
+assert.match(home, /<select name="brief_campaign_goal" required>.*<option value="到店" selected>到店/u);
+assert.match(home, /name="brief_confirmed" value="1" required/u);
 assert.doesNotMatch(home, /name="bus_stock"|费用区间/u);
 assert.doesNotMatch(home, /name="source"/u);
 assert.equal((await page(root)).headers.get('referrer-policy'), 'same-origin');
@@ -44,7 +46,10 @@ assert.match(exportDemo.headers.get('content-disposition'), /cityline-food-both-
 const offline = await exportDemo.text();
 assert.doesNotMatch(offline, /本案的资源和数量与/u);
 const workflowCopy = /data-review-status|data-approved-variant|未审批|待审批|审批中|待审核|人工确认采用|确认时间|备选草案 · 待(?:客户)?确认/u;
+const removedReportCallouts = /class="report-recommendation"|投放条件说明|<small>报价参考|上海新云传媒|仅有历史标签人流|暂无可用于估算的单位触达|待补新云触达数据|本方案无此类投放/u;
 assert.doesNotMatch(offline, workflowCopy);
+assert.doesNotMatch(offline, removedReportCallouts);
+assert.match(offline, /class="report-glance-reach">\s*<dt>组合曝光<\/dt>\s*<dd>[\d,]+ <small>人次/u);
 function verifyCampaignRequirements(html) {
   const context = html.match(/aria-label="品牌与目标">([\s\S]*?)<\/dl>/u)?.[1] ?? '';
   assert.deepEqual([...context.matchAll(/<dt>([^<]+)<\/dt>/gu)].map((match) => match[1]), [
@@ -64,7 +69,8 @@ assert.match(offline, /KPI 与统计口径[\s\S]*有效到店试饮扫码量/u);
 assert.match(offline, /<details class="media-item">/u);
 assert.match(offline, /<body class="report-page">/u);
 assert.match(offline, /class="report-schedule"/u);
-for (const heading of ['公司简介', '目标圈与媒介组合', '发布推荐', '采购清单与刊例', '增值权益与交付']) {
+assert.doesNotMatch(offline, /公司简介|id="media-operator"/u);
+for (const heading of ['目标圈与媒介组合', '发布推荐', '采购清单与刊例', '增值权益与交付']) {
   assert.ok(offline.includes(heading), heading);
 }
 assert.equal((offline.match(/客户预算量级<\/dt><dd>约 200 万元<\/dd>/gu) ?? []).length, 1);
@@ -257,7 +263,7 @@ async function confirmTaskGoal(path, goal = '认知') {
   return confirmed.headers.get('location');
 }
 const emptyGoal = await completedTask(emptyGoalPath);
-assert.equal(emptyGoal.state, 'review');
+assert.equal(emptyGoal.state, 'done');
 assert.equal(emptyGoal.offer_review, false);
 assert.equal(emptyGoal.offer_goal_confirmation, true);
 const emptyGoalApproval = await fetch(origin + emptyGoalPath + '/review', {
@@ -271,9 +277,10 @@ assert.equal(done.state, 'done');
 assert.equal(done.has_agent_trace, true);
 assert.equal(done.steps.length, 5);
 assert.match(done.steps[1].notes.join(' '), /已锁定赛用数据快照/u);
-assert.match(done.steps[4].notes.join(' '), /HTML 已渲染并保存/u);
+assert.match(done.steps[4].notes.join(' '), /HTML 已生成，可以直接浏览/u);
 const taskResult = await (await page(taskPath)).text();
-assert.match(taskResult, /正式报告将在平台数据齐备并通过人工确认后开放/u);
+assert.match(taskResult, /data-task-report-links>/u);
+assert.match(taskResult, /打开独立 HTML/u);
 assert.match(taskResult, /查看 Agent 协作/u);
 const ruleTrace = await (await page(taskPath + '/agent-trace')).text();
 assert.equal([...ruleTrace.matchAll(/>规则兜底<\/span>/gu)].length, 3);
@@ -282,7 +289,8 @@ assert.doesNotMatch(ruleTrace, /input_summary|prompt_sha256|model_output/u);
 assert.doesNotMatch(taskResult, /type="file"/u);
 const taskReport = await page(taskPath + '/review-copy?theme=dark');
 assert.equal(taskReport.headers.get('content-disposition'), null);
-await page(taskPath + '/report?preview=1', 409);
+assert.equal((await page(taskPath + '/report?preview=1')).headers.get('content-disposition'), null);
+assert.match((await page(taskPath + '/report')).headers.get('content-disposition'), /\.html/u);
 await page(taskPath + '/report?delivery=1', 409);
 const publishChecklist = await (await page(taskPath + '/evidence?scope=publication')).text();
 assert.match(publishChecklist, /正式报告核验清单/u);
@@ -300,7 +308,7 @@ assert.match(taskHtml, /data-theme="light"/u);
 assert.doesNotMatch(taskHtml, workflowCopy);
 assert.match(taskHtml, /内部核验副本/u);
 assert.equal((taskHtml.match(/name="report-view"/gu) ?? []).length, 3);
-assert.match(taskHtml, /投放建议/u);
+assert.doesNotMatch(taskHtml, removedReportCallouts);
 assert.match(taskHtml, /查看核验依据/u);
 assert.match(taskHtml, generatedAt);
 assert.equal((await (await page(taskPath + '/review-copy?preview=1')).text()).match(generatedAt)?.[1], taskHtml.match(generatedAt)?.[1]);
@@ -337,9 +345,9 @@ assert.match(demoTaskReport, /2027-01-01 至 2027-12-31/u);
 assert.match(demoTaskReport, /店均日有效扫码量较基线提升至少 15%/u);
 assert.doesNotMatch(demoTaskReport, workflowCopy);
 const demoCalendar = demoTaskReport.split('id="calendar"')[1].split('</section>')[0];
-for (const [month, amount] of [['05', 40], ['07', 120], ['10', 40]]) {
+for (const [month, amount, share] of [['05', 40, 20], ['07', 120, 60], ['10', 40, 20]]) {
   assert.match(demoCalendar, new RegExp(
-    '2027-' + month + '-01 至 2027-' + month + '-31</strong>[\\s\\S]*?计划预算 ' + amount + '\\.00 万元', 'u',
+    '2027-' + month + '-01 至 2027-' + month + '-31</strong>[\\s\\S]*?计划预算 ' + amount + '\\.00 万元 · 占整案 ' + share + '%', 'u',
   ));
 }
 await page(demoTaskPath + '/report?delivery=1', 409);
@@ -362,7 +370,7 @@ const julyFormal = await recoverImported(await fetch(origin + root + '/create', 
 assert.equal(julyFormal.status, 303);
 const julyFormalPath = julyFormal.headers.get('location');
 const awaitingOps = await completedTask(julyFormalPath);
-assert.equal(awaitingOps.state, 'review');
+assert.equal(awaitingOps.state, 'done');
 assert.equal(awaitingOps.offer_review, false);
 assert.deepEqual(awaitingOps.approval_readiness, { a: false, b: false });
 assert.match(awaitingOps.steps[4].notes.join(' '), /A 案核验状态.*B 案核验状态/u);
@@ -389,18 +397,27 @@ const evidenceDraft = await run({ industry: 'food', month: '2027-07', media: 'bu
 assert.equal(evidenceDraft.status, 303);
 const evidenceDraftPath = await confirmTaskGoal(evidenceDraft.headers.get('location'));
 const evidenceState = await completedTask(evidenceDraftPath);
-assert.equal(evidenceState.state, 'review');
+assert.equal(evidenceState.state, 'done');
+assert.equal(evidenceState.steps[4].state, 'done');
+assert.equal(evidenceState.offer_report, true);
+assert.equal(evidenceState.offer_formal_delivery, false);
 assert.equal(evidenceState.offer_local_snapshot, true);
 const allTasks = await (await page('/task-log')).text();
 assert.match(allTasks, /<option value="exceptions">异常任务<\/option>/u);
 const scopedExceptions = await (await page('/task-log?filter=exceptions&q=' + evidenceDraftPath.split('/').at(-1))).text();
 assert.ok(scopedExceptions.includes(`href="${evidenceDraftPath}"`));
-assert.match(scopedExceptions, /data-status="待核对"/u);
+assert.match(scopedExceptions, /data-status="已完成"/u);
 const pendingTasks = await (await page('/task-log?filter=pending')).text();
 assert.ok(pendingTasks.includes(`href="${taskPath}"`));
 assert.ok(!pendingTasks.includes(`href="${evidenceDraftPath}"`));
 const draftReport = await (await page(evidenceDraftPath + '/review-copy?preview=1')).text();
-assert.match(draftReport, /待补新云触达数据/u);
+assert.doesNotMatch(draftReport, removedReportCallouts);
+const directReport = await (await page(evidenceDraftPath + '/report?preview=1')).text();
+assert.match(directReport, /方案 A／B 对比/u);
+assert.doesNotMatch(directReport, removedReportCallouts);
+assert.doesNotMatch(directReport, /class="report-glance-reach"/u);
+assert.equal(directReport.split('<body')[1].match(/[^<>\r\n]{0,40}(?:待核|待补|待确认|未审批|内部核验副本)[^<>\r\n]{0,30}/u)?.[0], undefined);
+await page(evidenceDraftPath + '/report?delivery=1', 409);
 assert.match(await (await page(evidenceDraftPath)).text(), /查看补证清单/u);
 const checklist = await (await page(evidenceDraftPath + '/evidence')).text();
 assert.match(checklist, /2027-07 缺少 人次\/辆\/天/u);
@@ -570,6 +587,7 @@ if (process.env.CITYLINE_TEST_REDBEAN_APPROVAL === '1') {
   await page(recoveredPath + '/report?delivery=1', 409);
   assert.doesNotMatch(await (await page(recoveredPath+'/review-copy?preview=1')).text(),workflowCopy);
   const inventoryExceptions = '/task-log?filter=exceptions&q=' + recoveredPath.split('/').at(-1);
+  assert.match(await (await page(inventoryExceptions)).text(), /data-status="已完成"/u);
   assert.match(await (await page(inventoryExceptions)).text(), /data-status="库存复核待处理"/u);
   const blockedQueues = await overviewQueues();
   assert.ok(queueSection(blockedQueues,'exception-tasks').includes(`href="${recoveredPath}"`));
@@ -611,6 +629,7 @@ assert.equal(retainedReturn.status, 303);
 const retainedId = retainedPath.split('/').at(-1);
 const returnedTasks = await (await page('/task-log?filter=exceptions&q=' + retainedId)).text();
 assert.match(returnedTasks, /data-status="已退回"/u);
+assert.match(returnedTasks, /data-status="已完成"/u);
 const deleted = await fetch(origin + retainedPath + '/delete', {
   method: 'POST', headers: { Origin: origin }, redirect: 'manual',
 });
@@ -625,7 +644,7 @@ const replanned = await refreshEvidence();
 assert.equal(replanned.status, 303, await replanned.text());
 const replannedPath = replanned.headers.get('location');
 const replannedState = await completedTask(replannedPath);
-assert.equal(replannedState.state, 'review');
+assert.equal(replannedState.state, 'done');
 assert.doesNotMatch(replannedState.steps[0].notes.join(' '), /已沿用原 A／B 采购清单和报价/u);
 assert.match(await (await page(replannedPath + '/review-copy?preview=1')).text(), /<td>2 \/ 2<\/td>/u);
 const recalculated = await recoverImported(await fetch(origin + taskPath + '/rerun', {
@@ -656,13 +675,13 @@ const rolling = await recoverImported(await fetch(origin + root + '/create', {
 }), '200');
 assert.equal(rolling.status, 303, await rolling.text());
 const rollingPath = rolling.headers.get('location');
-assert.equal((await completedTask(rollingPath)).state, 'review');
+assert.equal((await completedTask(rollingPath)).state, 'done');
 const rollingHtml = await (await page(rollingPath + '/review-copy')).text();
 verifyCampaignRequirements(rollingHtml);
 assert.match(rollingHtml, /2027-01-01 至 2027-12-31/u);
 assert.match(rollingHtml, /2027-10-01 至 2027-10-31<\/strong>\s*<p>31 天 · 待核对/u);
 assert.match(rollingHtml, generatedAt);
-assert.match(rollingHtml, /测试活动档期 · 调配权重 3/u);
+assert.match(rollingHtml, /测试活动档期/u);
 assert.match(rollingHtml, /机动 · 无采买/u);
 assert.match(rollingHtml, /预算已预留/u);
 assert.match(rollingHtml, /品牌与投放目标/u);
@@ -683,7 +702,7 @@ const unaffordable = await run({
 assert.equal(unaffordable.status, 303, await unaffordable.text());
 const unaffordablePath = await confirmTaskGoal(unaffordable.headers.get('location'));
 const unaffordableTask = await completedTask(unaffordablePath);
-assert.equal(unaffordableTask.state, 'review');
+assert.equal(unaffordableTask.state, 'done');
 assert.equal(unaffordableTask.offer_review, false);
 const unaffordableReport = await (await page(unaffordablePath + '/review-copy?preview=1')).text();
 assert.doesNotMatch(unaffordableReport, workflowCopy);
@@ -729,7 +748,7 @@ async function createWithRoutes(routes) {
   return { path, job: await completedTask(path) };
 }
 const selectedRoute = await createWithRoutes('10路');
-assert.equal(selectedRoute.job.state, 'review');
+assert.equal(selectedRoute.job.state, 'done');
 assert.match(selectedRoute.job.steps[4].notes.join(' '), /由本地规则执行报告核验 Agent/u);
 const selectedReport = await (await page(selectedRoute.path + '/review-copy')).text();
 assert.match(selectedReport, /10路 · 已核对档期可售余量与刊例/u);
@@ -775,11 +794,11 @@ assert.doesNotMatch(followupHtml, /预算变化 · 200 万元 → 500 万元/u);
 assert.deepEqual([...followupHtml.matchAll(/data-budget-strategy="([AB])"/gu)].map(match => match[1]), ['A', 'B']);
 
 const draft = await createWithRoutes('11路、12路');
-assert.equal(draft.job.state, 'review');
+assert.equal(draft.job.state, 'done');
 assert.equal(draft.job.has_alternative, true);
 const draftResponse = await page(draft.path + '/review-copy?preview=1');
 const draftAnnual = await draftResponse.text();
-assert.match(draftAnnual, /投放条件说明/u);
+assert.doesNotMatch(draftAnnual, removedReportCallouts);
 assert.doesNotMatch(draftAnnual, workflowCopy);
 assert.match(draftAnnual, /11路 · 红豆记录显示该档期无可售余量/u);
 assert.match(draftAnnual, /12路 · 红豆同档期快照无该线路记录/u);
@@ -798,7 +817,7 @@ const mayImport = await importData({ ...input, starts: '2027-05-01', ends: '2027
 assert.equal(mayImport.status, 303, await mayImport.text());
 assert.equal((await importData({ ...input, starts: '2027-10-01', ends: '2027-10-31' })).status, 303);
 const annualDraft = await createWithRoutes('10路');
-assert.equal(annualDraft.job.state, 'review');
+assert.equal(annualDraft.job.state, 'done');
 assert.deepEqual(annualDraft.job.recovery_snapshots.map(({ starts }) => starts), ['2027-05-01', '2027-07-01', '2027-10-01']);
 const annualDraftReport = await (await page(annualDraft.path + '/review-copy?preview=1')).text();
 assert.equal(financialRows(annualDraftReport).length, 12);
@@ -816,7 +835,7 @@ const plannedOps = await reviewOps(1);
 assert.equal(plannedOps.status, 303, await plannedOps.text());
 const opsPath = plannedOps.headers.get('location');
 const opsStatus = await completedTask(opsPath);
-assert.equal(opsStatus.state, 'review');
+assert.equal(opsStatus.state, 'done');
 assert.match(opsStatus.steps[0].notes.join(' '), /本次复核施工窗口与产能/u);
 assert.deepEqual(opsStatus.recovery_snapshots, annualDraft.job.recovery_snapshots);
 const opsHtml = await (await page(opsPath + '/review-copy?preview=1')).text();
@@ -839,7 +858,7 @@ const annualRecovery = await fetch(origin + annualDraft.path + '/rerun', {
 assert.equal(annualRecovery.status, 303, await annualRecovery.text());
 const annualRecoveryPath = annualRecovery.headers.get('location');
 const annualRecoveryState = await completedTask(annualRecoveryPath);
-assert.equal(annualRecoveryState.state, 'review');
+assert.equal(annualRecoveryState.state, 'done');
 assert.match(annualRecoveryState.steps[0].notes.join(' '), /已沿用原 A／B 采购清单和报价/u);
 const annualRecoveryReport = await (await page(annualRecoveryPath + '/review-copy?preview=1')).text();
 assert.match(annualRecoveryReport, /1,386 人次\/辆\/天/u);
@@ -914,6 +933,13 @@ const goalDraft = await recoverImported(await fetch(origin + root + '/create', {
     target_centers: firstCenter, brief_objective: '不要引导到店，这次只提高品牌认知', brief_confirmed: '1',
   }),
 }), '200');
+const noGoalFromForm = await fetch(origin + root + '/create', {
+  method: 'POST', headers: { Origin: origin },
+  body: new URLSearchParams({ industry: '食品饮料', budget: '200', bus: '1', metro: '1', ...focusDates,
+    brief_used: '1', brief_confirmed: '1' }),
+});
+assert.equal(noGoalFromForm.status, 422);
+assert.match(await noGoalFromForm.text(), /先在客户假设书中选择/u);
 assert.equal(goalDraft.status, 303);
 const goalPath = goalDraft.headers.get('location');
 const pendingGoal = await completedTask(goalPath);
@@ -921,7 +947,8 @@ assert.equal(pendingGoal.offer_goal_confirmation, true);
 assert.match(pendingGoal.steps[2].notes.join(' '), /客户主目标待确认/u);
 assert.doesNotMatch(pendingGoal.steps[2].notes.join(' '), /采用已确认的客户目标/u);
 const pendingReport = await (await page(goalPath + '/review-copy?preview=1')).text();
-assert.match(pendingReport, /待核草案保留两案/u);
+assert.doesNotMatch(pendingReport, /待核草案保留两案/u);
+assert.match(pendingGoal.steps[4].notes.join(' '), /待核草案保留两案/u);
 
 const postGoal = (goal) => fetch(origin + goalPath + '/confirm-goal', {
   method: 'POST', headers: { Origin: origin }, redirect: 'manual', body: new URLSearchParams({ goal }),
@@ -1023,7 +1050,7 @@ for (const { html } of [visit, awareness, preferredReach]) {
 }
 const substitutionPath = await runComparisonBrief('认知', '', '核对客户指定线路的同档期替换方式', '11路');
 const substitution = await completedTask(substitutionPath);
-assert.equal(substitution.state, 'review');
+assert.equal(substitution.state, 'done');
 assert.equal(substitution.offer_review, false);
 assert.equal(substitution.offer_route_replacement, true);
 const substitutionReport = await (await page(substitutionPath + '/review-copy?preview=1')).text();
@@ -1104,13 +1131,13 @@ const acceptedPeriods = await postPeriod('10');
 assert.equal(acceptedPeriods.status, 303, await acceptedPeriods.text());
 const acceptedPeriodPath = acceptedPeriods.headers.get('location');
 const acceptedPeriodStatus = await completedTask(acceptedPeriodPath);
-assert.equal(acceptedPeriodStatus.state, 'review');
+assert.equal(acceptedPeriodStatus.state, 'done');
 assert.equal(acceptedPeriodStatus.offer_route_replacement, false);
 assert.deepEqual(acceptedPeriodStatus.recovery_snapshots, periodDraftStatus.recovery_snapshots);
 assert.match(acceptedPeriodStatus.steps[0].notes.join(' '), /必选线路 11路 → 10，2 段/u);
 const acceptedPeriodReport = await (await page(acceptedPeriodPath + '/review-copy?preview=1')).text();
 assert.doesNotMatch(acceptedPeriodReport, /必选线路缺口与同档期备选/u);
-assert.match(acceptedPeriodReport, /投放条件说明/u);
+assert.doesNotMatch(acceptedPeriodReport, removedReportCallouts);
 
 const reviseBase = await runComparisonBrief('认知', '', '扩大新品包装在目标商圈的认知');
 const beforeRevision = await completedTask(reviseBase);
@@ -1197,7 +1224,7 @@ const moved = await moveSchedule();
 assert.equal(moved.status,303,await moved.text());
 const movedPath = moved.headers.get('location');
 const movedStatus = await completedTask(movedPath);
-assert.equal(movedStatus.state,'review');
+assert.equal(movedStatus.state,'done');
 assert.equal(movedStatus.offer_operations,true);
 assert.equal(movedStatus.offer_review,false);
 assert.deepEqual(movedStatus.recovery_snapshots,[{id:movedBatch,...movedDates}]);
@@ -1221,11 +1248,12 @@ assert.equal(incompleteMetricImport.status, 303, await incompleteMetricImport.te
 const pendingMetricPath = await runComparisonBrief('到店', 'core_bus_days', '两案必须先核对核心圈公交车日');
 const pendingMetric = await completedTask(pendingMetricPath);
 assert.deepEqual(pendingMetric.approval_readiness, { a: true, b: true });
-assert.equal(pendingMetric.state, 'review');
+assert.equal(pendingMetric.state, 'done');
 assert.equal(pendingMetric.offer_review, false);
 const pendingMetricReport = await (await page(pendingMetricPath + '/review-copy?preview=1')).text();
 assert.doesNotMatch(pendingMetricReport, workflowCopy);
-assert.match(pendingMetricReport, /客户指定的首要指标尚无法比较/u);
+assert.doesNotMatch(pendingMetricReport, /客户指定的首要指标尚无法比较/u);
+assert.match(pendingMetric.steps[4].notes.join(' '), /客户指定的首要指标尚无法比较/u);
 assert.doesNotMatch(pendingMetricReport, /建议优先复核 [AB] 案/u);
 const pendingMetricApproval = await fetch(origin + pendingMetricPath + '/review', {
   method: 'POST', headers: { Origin: origin }, redirect: 'manual',
@@ -1297,7 +1325,7 @@ const replay = await snapshotPost(fromSnapshot);
 assert.equal(replay.status, 303, await replay.text());
 const replayPath = replay.headers.get('location');
 const archiveTask = await completedTask(replayPath);
-assert.equal(archiveTask.state, 'review');
+assert.equal(archiveTask.state, 'done');
 assert.equal(archiveTask.platform_interrupted, false);
 assert.equal(archiveTask.offer_operations, true);
 assert.equal(archiveTask.offer_goal_confirmation, true);

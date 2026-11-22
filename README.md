@@ -74,6 +74,7 @@ cargo build --locked --manifest-path apps/acceptance-rust/Cargo.toml
 | 服务和 SQLite | 默认监听 `127.0.0.1:3412`，数据写入 `.operations-data/cityline.sqlite`。可用 `ACCEPTANCE_RUST_PORT` 和 `ACCEPTANCE_RUST_DATA` 覆盖。 |
 | 媒体刊例 | 将 `CITYLINE_CONTEST_TARIFF` 指向有权使用的 Excel 刊例表。 |
 | 新云和红豆 | 在 `.env.local` 配置 `CITYLINE_NEWCLOUD_ORIGIN`、`CITYLINE_REDBEAN_ORIGIN` 及授权资料中的接口路径。新云用于核对覆盖、线路图和触达，红豆用于核对档期库存与点位规格。默认按采购档期及入选资源查询新云 2023 年对应月，缺项再查同一资源的 5 月单位日触达，并在报告标明基准。可通过 `CITYLINE_NEWCLOUD_REACH_MONTHS` 限制已确认开放的月份。 |
+| 红豆预存账号 | 配置红豆 OAuth 客户端后，可通过服务端环境设置 `CITYLINE_REDBEAN_USERNAME` 与 `CITYLINE_REDBEAN_PASSWORD`。Windows 启动脚本也支持读取当前用户加密的 `%LOCALAPPDATA%\Hackson-Rust\secrets\redbean-platform-password.dpapi`。开启后任务和库存复核自动授权，新云仍单独认证。 |
 | 模型接入 | 在「Agent 配置 → 模型接入」选择服务端配置、云端或本地模型。三个角色可共享模型，也可分别配置并测试连接。Windows 上可从界面保存 API Key，也可通过环境变量注入。 |
 | 登录与授权 | 「系统设置」支持本地管理员登录、OIDC 和飞书登录，也可独立管理红豆库存授权。外部登录需配置 HTTPS 站点地址、回调和允许登录的用户。 |
 

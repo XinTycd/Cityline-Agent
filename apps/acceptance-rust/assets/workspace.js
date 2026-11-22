@@ -77,6 +77,7 @@
       const blocked = delivery.querySelector('[data-task-blocked]');
       const publicationChecklist = blocked.querySelector('[data-publication-checklist]');
       const reportLinks = delivery.querySelector('[data-task-report-links]');
+      const formalDelivery = reportLinks.querySelector('[data-formal-delivery]');
       const platformOutcome = delivery.querySelector('[data-platform-outcome]');
       const login = scope.querySelector('[data-platform-dialog]');
       const showLogin = scope.querySelector('[data-show-platform-dialog]');
@@ -139,8 +140,7 @@
           if (followProgress) steps[currentStep].choice.checked = true;
           if (progress.state !== 'active') {
             taskProgress.removeAttribute('data-active');
-            const reportVisible = progress.state === 'done' || progress.state === 'demo';
-            ready.hidden = !reportVisible;
+            ready.hidden = !progress.offer_report;
             if (review) review.hidden = !progress.offer_review;
             if (budgetConfirmation) budgetConfirmation.hidden = !progress.budget_confirmation_required;
             if (generationTime && progress.generation_time) {
@@ -150,6 +150,7 @@
             blocked.hidden = progress.offer_report;
             publicationChecklist.hidden = !progress.offer_proof_refresh;
             reportLinks.hidden = !progress.offer_report;
+            if (formalDelivery) formalDelivery.hidden = !progress.offer_formal_delivery;
             platformOutcome.hidden = !progress.platform_interrupted;
             for (const item of platformOutcome.querySelectorAll('[data-auth-result]')) {
               item.textContent = progress.login[item.dataset.authResult] ? '已确认' : '未确认';
@@ -441,21 +442,28 @@
         const review = taskForm.querySelector('[data-brief-review]');
         const field = (name) => taskForm.elements.namedItem(name);
         const sample = review.querySelector('[data-fill-campaign-case]');
-        function applySample(reveal) {
+        sample.addEventListener('click', () => {
           const values = JSON.parse(sample.dataset.fillCampaignCase);
           for (const [name, value] of Object.entries(values)) field(name).value = value;
           field('ends').dispatchEvent(new Event('input', { bubbles: true }));
           field('target_centers').dispatchEvent(new Event('input', { bubbles: true }));
           field('brief_campaign_goal').dispatchEvent(new Event('change', { bubbles: true }));
-          if (reveal) {
-            field('scheduling_factors').closest('details').open = true;
-            taskForm.querySelector('[data-trial-fields]').open = true;
-          }
+          field('scheduling_factors').closest('details').open = true;
+          taskForm.querySelector('[data-trial-fields]').open = true;
           field('brief_confirmed').disabled = false;
           field('brief_confirmed').checked = false;
-        }
-        sample.addEventListener('click', () => applySample(true), { signal });
-        applySample(false);
+        }, { signal });
+        taskForm.addEventListener('submit', (event) => {
+          const goal = field('brief_campaign_goal');
+          const confirmed = field('brief_confirmed');
+          const missing = !goal.value ? goal : !confirmed.checked ? confirmed : null;
+          if (!missing) return;
+          event.preventDefault();
+          review.open = true;
+          missing.setCustomValidity(missing === goal ? '请选择客户主目标。' : '请先确认客户假设书。');
+          missing.reportValidity();
+          missing.setCustomValidity('');
+        }, { signal });
         inputForm.addEventListener('submit', async (event) => {
           event.preventDefault();
           button.disabled = true;
@@ -625,7 +633,7 @@
     });
     document.addEventListener('submit', async (event) => {
       const form = event.target;
-      if (!form.matches('form[data-workspace-submit]')) return;
+      if (event.defaultPrevented || !form.matches('form[data-workspace-submit]')) return;
       event.preventDefault();
       if (form.matches('[aria-busy="true"]')) return;
       const fields = new FormData(form, event.submitter);

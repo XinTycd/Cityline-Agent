@@ -248,21 +248,22 @@ impl Refresh {
             StatusCode::CONFLICT,
             "请在系统设置中完成红豆授权，再确认所选方案。",
         );
-        let (token, tenant) = self
-            .redbean
-            .token_for_task(actor)
-            .or_else(|| {
-                let token = env::var("CITYLINE_REDBEAN_ACCESS_TOKEN").ok()?;
-                let tenant = env::var("CITYLINE_REDBEAN_TENANT_ID").unwrap_or_else(|_| "1".into());
-                (!token.is_empty()).then_some((token, tenant))
-            })
-            .ok_or(AUTHORIZATION)?;
         let _permit = self.slot.try_acquire().map_err(|_| {
             (
                 StatusCode::TOO_MANY_REQUESTS,
                 "另有获取数据或库存复核任务正在执行，请稍后再确认。",
             )
         })?;
+        let (token, tenant) = self
+            .redbean
+            .token_for_task(actor)
+            .await?
+            .or_else(|| {
+                let token = env::var("CITYLINE_REDBEAN_ACCESS_TOKEN").ok()?;
+                let tenant = env::var("CITYLINE_REDBEAN_TENANT_ID").unwrap_or_else(|_| "1".into());
+                (!token.is_empty()).then_some((token, tenant))
+            })
+            .ok_or(AUTHORIZATION)?;
         let payload = serde_json::to_vec(checks).map_err(|_| UNAVAILABLE)?;
         let mut command = Command::new("node");
         command
@@ -318,7 +319,15 @@ impl Refresh {
             }
             Some(3) => {
                 self.redbean.clear_rejected(actor, &token);
-                Err(AUTHORIZATION.into())
+                Err(if self.redbean.uses_stored_account() {
+                    (
+                        StatusCode::CONFLICT,
+                        "红豆拒绝本次库存复核。再次确认时会重新认证预存账号。",
+                    )
+                } else {
+                    AUTHORIZATION
+                }
+                .into())
             }
             _ => Err(UNAVAILABLE.into()),
         }
@@ -375,7 +384,7 @@ impl Refresh {
             .clear(scope);
     }
 
-    pub(crate) fn preflight(proof_only: bool, media: &str) -> Result<PathBuf, WebError> {
+    pub(crate) fn preflight(&self, proof_only: bool, media: &str) -> Result<PathBuf, WebError> {
         let tariff = if proof_only {
             PathBuf::new()
         } else {
@@ -428,6 +437,9 @@ impl Refresh {
                 "红豆平台登录、库存查询或地铁规格配置不完整，请核对本机环境配置。",
             ));
         }
+        if !proof_only {
+            self.redbean.check_stored_configuration()?;
+        }
         if !Path::new("node_modules/playwright-core/package.json").is_file() {
             return Err((
                 StatusCode::SERVICE_UNAVAILABLE,
@@ -437,14 +449,23 @@ impl Refresh {
         Ok(tariff)
     }
 
-    pub(crate) fn launch(&self, request: BrowserRequest, actor: &User) -> Result<Uuid, WebError> {
-        let tariff = Self::preflight(request.proof.is_some(), request.media)?;
+    pub(crate) async fn launch(
+        &self,
+        request: BrowserRequest,
+        actor: &User,
+    ) -> Result<Uuid, WebError> {
+        let tariff = self.preflight(request.proof.is_some(), request.media)?;
         let permit = self.slot.clone().try_acquire_owned().map_err(|_| {
             (
                 StatusCode::CONFLICT,
                 "已有获取数据的任务正在运行，请等待完成。",
             )
         })?;
+        let redbean_auth = if request.proof.is_some() {
+            None
+        } else {
+            self.redbean.token_for_task(&actor.identifier).await?
+        };
         let id = Uuid::new_v4();
         let token = Uuid::new_v4();
         let directory = self.directory.join(id.to_string());
@@ -469,7 +490,9 @@ impl Refresh {
         })?;
         let mut active = self.active.lock().expect("refresh lock");
         let mut command = Command::new("node");
-        command.env_remove("CITYLINE_NEWCLOUD_REUSED");
+        command
+            .env_remove("CITYLINE_NEWCLOUD_REUSED")
+            .env_remove("CITYLINE_REDBEAN_FIXED_ACCOUNT");
         let cached = self
             .newcloud
             .lock()
@@ -485,10 +508,13 @@ impl Refresh {
             command
                 .env_remove("CITYLINE_REDBEAN_ACCESS_TOKEN")
                 .env_remove("CITYLINE_REDBEAN_TENANT_ID");
-        } else if let Some((token, tenant)) = self.redbean.token_for_task(&actor.identifier) {
+        } else if let Some((token, tenant)) = &redbean_auth {
             command
                 .env("CITYLINE_REDBEAN_ACCESS_TOKEN", token)
                 .env("CITYLINE_REDBEAN_TENANT_ID", tenant);
+            if self.redbean.uses_stored_account() {
+                command.env("CITYLINE_REDBEAN_FIXED_ACCOUNT", "1");
+            }
         }
         let child = command
             .arg("scripts/refresh-media-browser.mjs")
@@ -501,6 +527,8 @@ impl Refresh {
             .env_remove("CITYLINE_OIDC_CLIENT_SECRET")
             .env_remove("CITYLINE_REDBEAN_OAUTH_CLIENT_SECRET")
             .env_remove("CITYLINE_REDBEAN_OAUTH_CLIENT_ID")
+            .env_remove("CITYLINE_REDBEAN_USERNAME")
+            .env_remove("CITYLINE_REDBEAN_PASSWORD")
             .env("CITYLINE_MEDIA_IMPORT_TOKEN", token.to_string())
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
@@ -522,6 +550,8 @@ impl Refresh {
         });
         drop(active);
         let active = self.active.clone();
+        let redbean = self.redbean.clone();
+        let actor = actor.identifier.clone();
         tokio::spawn(async move {
             let _permit = permit;
             let mut child = child;
@@ -531,6 +561,11 @@ impl Refresh {
                 let _ = child.kill().await;
             }
             let mut last = BrowserStatus::read(&status);
+            if last.state == "error_redbean_auth"
+                && let Some((token, _)) = redbean_auth
+            {
+                redbean.clear_rejected(&actor, &token);
+            }
             if !last.terminal() {
                 last.state = if timed_out {
                     "error_timeout"
@@ -580,29 +615,31 @@ async fn start(
     let (starts, ends) = (crate::media::SHOWCASE_START, crate::media::SHOWCASE_END);
     let rolling = Rolling::showcase("", starts, ends).expect("default showcase phases are valid");
     let periods = BrowserWindow::for_schedule(starts, ends, Some(&rolling))?;
-    let id = app.launch(
-        BrowserRequest {
-            industry: "food",
-            center: crate::media::FOOD_COVERAGE_CENTERS.into(),
-            starts: starts.into(),
-            ends: ends.into(),
-            media: "both",
-            radius: crate::media::FOOD_COVERAGE_RADIUS,
-            supplemental_center: None,
-            required_routes: Vec::new(),
-            periods,
-            budget: crate::media::SHOWCASE_BUDGET,
-            rolling: Some(rolling),
-            target_centers: Vec::new(),
-            core_circle: None,
-            policy: watch::channel(Some(Policy::default())).1,
-            portfolio: Arc::default(),
-            evidence_plan: Arc::default(),
-            saved_overview_routes: Vec::new(),
-            proof: None,
-        },
-        &user,
-    )?;
+    let id = app
+        .launch(
+            BrowserRequest {
+                industry: "food",
+                center: crate::media::FOOD_COVERAGE_CENTERS.into(),
+                starts: starts.into(),
+                ends: ends.into(),
+                media: "both",
+                radius: crate::media::FOOD_COVERAGE_RADIUS,
+                supplemental_center: None,
+                required_routes: Vec::new(),
+                periods,
+                budget: crate::media::SHOWCASE_BUDGET,
+                rolling: Some(rolling),
+                target_centers: Vec::new(),
+                core_circle: None,
+                policy: watch::channel(Some(Policy::default())).1,
+                portfolio: Arc::default(),
+                evidence_plan: Arc::default(),
+                saved_overview_routes: Vec::new(),
+                proof: None,
+            },
+            &user,
+        )
+        .await?;
     Ok((StatusCode::ACCEPTED, Json(json!({"id": id}))))
 }
 

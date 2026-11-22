@@ -75,6 +75,10 @@ impl BriefContext {
 
 pub(super) const SHOWCASE_CORE: &str = "上海市静安区南京西路789号";
 
+pub(super) fn showcase_centers() -> String {
+    format!("{SHOWCASE_CORE}\n上海市静安区静安寺")
+}
+
 pub(super) fn showcase_brief() -> BriefContext {
     BriefContext {
         customer_profile: "上海区域连锁即饮品牌，在沪约 12 家线下门店。本次在静安区 4 家门店开展试饮。".into(),
@@ -105,7 +109,7 @@ pub(super) fn showcase_fields() -> String {
         "brief_campaign_goal": brief.campaign_goal, "brief_comparison_focus": "",
         "brief_audience": brief.audience, "brief_region": brief.region, "brief_monitoring": brief.monitoring,
         "trial_stores": trial.stores, "trial_window": trial.window, "trial_baseline": trial.baseline,
-        "core_circle": SHOWCASE_CORE, "target_centers": format!("{SHOWCASE_CORE}\n上海市静安区静安寺"),
+        "core_circle": SHOWCASE_CORE, "target_centers": showcase_centers(),
         "scheduling_factors": super::schedule::SHOWCASE_PHASES,
     }).to_string()
 }
