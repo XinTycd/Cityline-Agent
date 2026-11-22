@@ -77,9 +77,9 @@
     </fieldset>
     <details class="rolling-fields">
       <summary>按月核验与调配</summary>
-      <p>策略 Agent 先核对客户目标和档期依据，再按采购段查询红豆库存、报价及必选线路。</p>
-      <label>各段调配依据（选填）<textarea name="scheduling_factors" rows="3" maxlength="600" placeholder="2027-07-01 | 3 | 门店暑期体验活动&#10;2027-09-01 | 1 | 已确认的商圈活动">{{ crate::media::schedule::SHOWCASE_PHASES }}</textarea></label>
-      <p>每行填写月初日期、权重 0–3 和原因。填写后仅按权重大于 0 的月份发起查询。留空时由策略阶段提出候选档期。</p>
+      <p>默认按 5 月预热、7 月主投、10 月回访安排。策略 Agent 先核对客户目标，再按档期查询红豆库存、报价及必选线路。</p>
+      <label>客户指定的月度安排（选填）<textarea name="scheduling_factors" rows="3" maxlength="600" placeholder="2027-09-01 | 3 | 已确认的商圈活动"></textarea></label>
+      <p>每行填写月初日期、权重 0–3 和原因。填写后仅查询权重大于 0 的月份。留空时优先采用所选日期内的默认月份。若没有默认月份，则按所选档期投放。</p>
     </details>
     <details class="rolling-fields" data-brief-review>
       <summary>客户假设书与目标圈</summary>
@@ -108,8 +108,7 @@
       {% include "media-ops-fields.html" %}
     </details>
     <div class="form-actions">
-      <p>新品试饮案按假设书安排 5 月 40 万、7 月 120 万、10 月 40 万。实际报价按平台档期和刊例核算。</p>
-      <p>先核对提案策略，再按候选采购段查询红豆与新云。缺少库存的采购段会列为待核。</p>
+      <p>全年档期默认按 5 月 40 万、7 月 120 万、10 月 40 万规划。实际报价按平台库存和刊例核算。</p>
       <button type="submit">一键生成提案</button>
     </div>
   </form>

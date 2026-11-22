@@ -110,7 +110,7 @@ pub(super) fn showcase_fields() -> String {
         "brief_audience": brief.audience, "brief_region": brief.region, "brief_monitoring": brief.monitoring,
         "trial_stores": trial.stores, "trial_window": trial.window, "trial_baseline": trial.baseline,
         "core_circle": SHOWCASE_CORE, "target_centers": showcase_centers(),
-        "scheduling_factors": super::schedule::SHOWCASE_PHASES,
+        "scheduling_factors": "",
     }).to_string()
 }
 

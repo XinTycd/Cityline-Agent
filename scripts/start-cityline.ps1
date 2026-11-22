@@ -1,20 +1,23 @@
 param(
-    [string]$Executable
+    [string]$Executable,
+    [switch]$ExportUbuntu
 )
 
 $ErrorActionPreference = 'Stop'
 $workspace = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).ProviderPath
 $runtime = Join-Path $env:LOCALAPPDATA 'Hackson-Rust'
-if (-not $Executable) {
+if (-not $ExportUbuntu -and -not $Executable) {
     $Executable = @(
         (Join-Path $workspace 'apps/acceptance-rust/target/debug/hackson-acceptance.exe')
         (Join-Path $runtime 'acceptance-target/debug/hackson-acceptance.exe')
     ) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
 }
-if (-not $Executable) {
-    throw '请先构建 Rust 服务，或用 -Executable 指定已构建的程序。'
+if (-not $ExportUbuntu) {
+    if (-not $Executable) {
+        throw '请先构建 Rust 服务，或用 -Executable 指定已构建的程序。'
+    }
+    $Executable = (Resolve-Path -LiteralPath $Executable).ProviderPath
 }
-$Executable = (Resolve-Path -LiteralPath $Executable).ProviderPath
 $secretFile = Join-Path $runtime 'secrets/b1x-media-key.dpapi'
 $redbeanClientFile = Join-Path $runtime 'secrets/redbean-oauth-client.dpapi'
 $redbeanPasswordFile = Join-Path $runtime 'secrets/redbean-platform-password.dpapi'
@@ -73,9 +76,13 @@ try {
         $redbeanPlatformAccount = [pscredential]::new($env:CITYLINE_REDBEAN_USERNAME, $redbeanPassword)
         $env:CITYLINE_REDBEAN_PASSWORD = $redbeanPlatformAccount.GetNetworkCredential().Password
     }
-    & $Executable
-    if ($LASTEXITCODE -ne 0) {
-        throw "城线服务退出，退出码 $LASTEXITCODE。"
+    if ($ExportUbuntu) {
+        & (Join-Path $workspace 'deploy/ubuntu/export-windows.ps1') -Workspace $workspace -Runtime $runtime
+    } else {
+        & $Executable
+        if ($LASTEXITCODE -ne 0) {
+            throw "城线服务退出，退出码 $LASTEXITCODE。"
+        }
     }
 } finally {
     if ($credential) {

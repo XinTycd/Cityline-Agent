@@ -17,7 +17,11 @@ use crate::{
     web::{self, WebError},
 };
 
-pub(super) const SHOWCASE_PHASES: &str = "2027-05-01 | 1 | 预热 · 新品试饮\n2027-07-01 | 3 | 主投 · 暑期试饮\n2027-10-01 | 1 | 回访 · 重点门店";
+const DEFAULT_PHASES: [(&str, u32, &str); 3] = [
+    ("2027-05-01", 1, "预热 · 新品试饮"),
+    ("2027-07-01", 3, "主投 · 暑期试饮"),
+    ("2027-10-01", 1, "回访 · 重点门店"),
+];
 
 #[derive(Clone, Default, Deserialize, Serialize)]
 pub(crate) struct Rolling {
@@ -28,37 +32,14 @@ pub(crate) struct Rolling {
     staged: bool,
     #[serde(default)]
     snapshot_span: bool,
-    #[serde(default)]
-    suggest_phases: bool,
 }
 
-#[derive(Clone, Copy, Deserialize, Eq, PartialEq, PartialOrd, Ord, Serialize)]
+#[derive(Serialize)]
 #[serde(rename_all = "snake_case")]
 enum Phase {
     Warmup,
     Main,
     Followup,
-}
-
-impl Phase {
-    fn factor(self) -> Factor {
-        let (weight, reason) = match self {
-            Self::Warmup => (1, "预热 · 提前建立线下曝光"),
-            Self::Main => (3, "主投 · 集中覆盖目标圈"),
-            Self::Followup => (1, "补投 · 补充覆盖并留存复盘依据"),
-        };
-        Factor {
-            weight,
-            reason: reason.into(),
-        }
-    }
-}
-
-#[derive(Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub(super) struct PhaseChoice {
-    month: String,
-    phase: Phase,
 }
 
 #[derive(Clone, Deserialize, Eq, PartialEq, Serialize)]
@@ -132,35 +113,7 @@ impl Rolling {
     }
 
     pub(crate) fn showcase(input: &str, starts: &str, ends: &str) -> Result<Self, &'static str> {
-        let mut plan = Self::revised(None, input, starts, ends)?;
-        plan.suggest_phases = input.trim().is_empty();
-        Ok(plan)
-    }
-
-    pub(super) fn candidate_months(&self, starts: &str, ends: &str) -> Vec<String> {
-        if self.suggest_phases {
-            months_between(starts, ends)
-        } else {
-            Vec::new()
-        }
-    }
-
-    pub(super) fn adopt_phases(&mut self, months: &[String], choices: &[PhaseChoice]) -> bool {
-        if months.is_empty()
-            || choices.len() > 3
-            || !choices.iter().any(|choice| choice.phase == Phase::Main)
-            || choices.iter().any(|choice| !months.contains(&choice.month))
-            || !choices
-                .windows(2)
-                .all(|pair| pair[0].month < pair[1].month && pair[0].phase < pair[1].phase)
-        {
-            return false;
-        }
-        self.factors = choices
-            .iter()
-            .map(|choice| (format!("{}-01", choice.month), choice.phase.factor()))
-            .collect();
-        true
+        Self::revised(None, input, starts, ends)
     }
 
     pub(super) fn revised(
@@ -221,19 +174,26 @@ impl Rolling {
         }
         rolling.factors.extend(overrides);
         if rolling.factors.is_empty() {
-            let months = months_between(starts, ends);
-            let main = months.len() / 2;
-            for (index, phase) in [
-                (0, Phase::Warmup),
-                (main, Phase::Main),
-                (months.len() - 1, Phase::Followup),
-            ] {
-                if (phase != Phase::Main) && index == main {
-                    continue;
+            for (date, weight, reason) in DEFAULT_PHASES {
+                let month = &date[..7];
+                if first_month <= month && month <= last_month {
+                    rolling.factors.insert(
+                        date.into(),
+                        Factor {
+                            weight,
+                            reason: reason.into(),
+                        },
+                    );
                 }
-                rolling
-                    .factors
-                    .insert(format!("{}-01", months[index]), phase.factor());
+            }
+            if rolling.factors.is_empty() {
+                let first = super::date_month(starts).expect("validated start date");
+                let last = super::date_month(ends).expect("validated end date");
+                for month in first..=last {
+                    rolling
+                        .factors
+                        .insert(format!("2027-{month:02}-01"), Factor::default());
+                }
             }
         }
         if rolling.factors.values().all(|factor| factor.weight == 0) {
@@ -315,12 +275,6 @@ impl Rolling {
         }
         Ok(windows)
     }
-}
-
-fn months_between(starts: &str, ends: &str) -> Vec<String> {
-    (super::date_month(starts).unwrap_or(1)..=super::date_month(ends).unwrap_or(12))
-        .map(|month| format!("2027-{month:02}"))
-        .collect()
 }
 
 fn days_from_year_start(day: &str) -> u32 {
@@ -889,7 +843,7 @@ struct CalendarReport<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Calendar, Phase, PhaseChoice, Rolling, Segment};
+    use super::{Calendar, Rolling, Segment};
 
     #[test]
     fn date_picker_range_keeps_partial_month_boundaries() {
@@ -923,47 +877,35 @@ mod tests {
     }
 
     #[test]
-    fn explicit_windows_are_preserved_and_automatic_choices_must_stay_in_bounds() {
-        let (starts, ends) = ("2027-01-01", "2027-12-31");
-        let mut fixed = Rolling::showcase("2027-09-01 | 3 | 客户确认活动", starts, ends).unwrap();
-        let choice = |month: &str, phase| PhaseChoice {
-            month: month.into(),
-            phase,
-        };
-        let paid = |rolling: &Rolling| {
-            rolling
-                .windows(starts, ends)
-                .unwrap()
-                .into_iter()
-                .filter(|window| window.needs_stock())
-                .map(|window| window.starts)
-                .collect::<Vec<_>>()
-        };
-        assert!(fixed.candidate_months(starts, ends).is_empty());
-        assert!(!fixed.adopt_phases(&[], &[choice("2027-08", Phase::Main)]));
-        assert_eq!(paid(&fixed), ["2027-09-01"]);
-        let mut auto = Rolling::showcase("", starts, ends).unwrap();
-        let months = auto.candidate_months(starts, ends);
-        assert!(!auto.adopt_phases(&months, &[choice("2028-08", Phase::Main)]));
-        assert!(!auto.adopt_phases(
-            &months,
-            &[
-                choice("2027-08", Phase::Main),
-                choice("2027-08", Phase::Followup)
+    fn default_paid_stages_stay_within_selected_dates() {
+        let (starts, ends) = ("2027-05-23", "2027-09-12");
+        let rolling = Rolling::showcase("", starts, ends).unwrap();
+        let paid = rolling
+            .windows(starts, ends)
+            .unwrap()
+            .into_iter()
+            .filter(|window| window.needs_stock())
+            .map(|window| (window.starts, window.ends, window.factor.weight))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            paid,
+            [
+                ("2027-05-23".into(), "2027-05-31".into(), 1),
+                ("2027-07-01".into(), "2027-07-31".into(), 3),
             ]
-        ));
-        assert!(auto.adopt_phases(&months, &[choice("2027-08", Phase::Main)]));
-        assert_eq!(paid(&auto), ["2027-08-01"]);
+        );
     }
 
     #[test]
-    fn short_range_outside_example_phases_still_has_a_paid_stage() {
+    fn range_without_a_default_month_uses_the_selected_dates() {
         let starts = "2027-02-04";
         let ends = "2027-02-13";
         let rolling = Rolling::showcase("", starts, ends).unwrap();
         let periods = rolling.windows(starts, ends).unwrap();
         assert_eq!(periods.len(), 1);
-        assert!(periods[0].needs_stock());
+        assert_eq!(periods[0].starts, starts);
+        assert_eq!(periods[0].ends, ends);
+        assert_eq!(periods[0].factor.weight, 1);
         assert!(Rolling::showcase("2027-05-01 | 1 | 试饮", starts, ends).is_err());
     }
 
@@ -997,15 +939,10 @@ mod tests {
     }
 
     #[test]
-    fn explicit_phase_weights_keep_original_budget_when_feasible() {
+    fn default_phases_keep_original_budget_when_feasible() {
         let (starts, ends) = ("2027-01-01", "2027-12-31");
-        let rolling = Rolling::showcase(
-            "2027-05-01 | 1 | 预热\n2027-07-01 | 3 | 主投\n2027-10-01 | 1 | 回访",
-            starts,
-            ends,
-        )
-        .unwrap();
-        let segments = rolling
+        let rolling = Rolling::showcase("", starts, ends).unwrap();
+        let segments: Vec<_> = rolling
             .windows(starts, ends)
             .unwrap()
             .into_iter()
@@ -1015,6 +952,13 @@ mod tests {
                 snapshot: None,
             })
             .collect();
+        assert_eq!(
+            segments
+                .iter()
+                .map(|s| s.window.starts.as_str())
+                .collect::<Vec<_>>(),
+            ["2027-05-01", "2027-07-01", "2027-10-01"]
+        );
         let calendar = Calendar { segments };
         let bounds = [
             Some((320_000, 700_000)),

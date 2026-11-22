@@ -55,7 +55,7 @@ const DATA: usize = 1;
 const STRATEGY: usize = 2;
 const MIX: usize = 3;
 const REPORT: usize = 4;
-const AGENT_CONTRACT: u8 = 9;
+const AGENT_CONTRACT: u8 = 10;
 const LABELS: [&str; 5] = ["需求接收", "数据核验", "提案策略", "组合核算", "报告交付"];
 const TASK_NAME_PREFIX: &str = "饮食食品";
 const TASK_COLUMNS: &str = "payload, active, review, review_note,
@@ -146,6 +146,8 @@ pub(super) struct Task {
     #[serde(default)]
     previous_task: Option<Uuid>,
     state: TaskState,
+    #[serde(default)]
+    marked_normal: bool,
     steps: [Step; 5],
     agents: usize,
     #[serde(default)]
@@ -331,6 +333,7 @@ impl Task {
             options,
             previous_task,
             state: TaskState::Active,
+            marked_normal: false,
             steps: std::array::from_fn(|_| Step {
                 state: StepState::Pending,
                 notes: Vec::new(),
@@ -451,6 +454,9 @@ impl Task {
     }
 
     pub(super) fn status(&self) -> &'static str {
+        if self.marked_normal && !self.state.active() {
+            return "正常";
+        }
         if self.report_saved && !self.is_demo() {
             return "已完成 · HTML 已生成";
         }
@@ -505,6 +511,9 @@ impl Task {
     }
 
     fn list_status(&self) -> (&'static str, &'static str) {
+        if self.marked_normal && !self.state.active() {
+            return ("正常", "success");
+        }
         if self.report_saved && !self.is_demo() {
             return ("已完成", "success");
         }
@@ -1087,12 +1096,8 @@ async fn run(
         && options.ends.as_deref() == Some(super::SHOWCASE_END)
     {
         options.rolling = Some(
-            super::schedule::Rolling::showcase(
-                super::schedule::SHOWCASE_PHASES,
-                super::SHOWCASE_START,
-                super::SHOWCASE_END,
-            )
-            .expect("showcase phases are within the showcase year"),
+            super::schedule::Rolling::showcase("", super::SHOWCASE_START, super::SHOWCASE_END)
+                .expect("showcase phases are within the showcase year"),
         );
         options.brief = Some(super::brief::showcase_brief());
     }
@@ -2242,6 +2247,7 @@ fn task_queues_sql() -> String {
                         AND json_extract(payload, '$.options.demo')=1 THEN 'demo'
                         ELSE json_extract(payload, '$.state') END AS state,
                    coalesce(json_extract(payload, '$.options.demo'),0)=1 AS is_demo,
+                   json_extract(payload, '$.marked_normal') IS 1 AS marked_normal,
                    report IS NULL AS missing_report,
                    coalesce(({APPROVAL_READY}), 0) AS approval_ready,
                    json_type(payload, '$.approval_inventory_issue') IS 'text' AS inventory_blocked
@@ -2251,7 +2257,7 @@ fn task_queues_sql() -> String {
             SELECT *,
                 (active=0 AND state='done' AND review='pending' AND NOT missing_report
                     AND approval_ready AND NOT inventory_blocked) AS awaiting_confirmation,
-                (active=0 AND state<>'demo' AND NOT is_demo AND (
+                (active=0 AND NOT marked_normal AND state<>'demo' AND NOT is_demo AND (
                     review='returned' OR state IN ('review','failed')
                     OR (state='done' AND review='pending' AND NOT approval_ready)
                     OR (review='pending' AND inventory_blocked)
@@ -2296,7 +2302,7 @@ async fn listing(
                  WHEN 'active' THEN active=1
                  WHEN 'pending' THEN awaiting_confirmation
                  WHEN 'completed' THEN active=0 AND report_saved AND NOT is_demo
-                 WHEN 'failed' THEN active=0 AND state IN ('active','failed')
+                 WHEN 'failed' THEN active=0 AND NOT marked_normal AND state IN ('active','failed')
                  ELSE has_exception
                END
                AND CASE WHEN EXISTS (
@@ -2717,8 +2723,6 @@ struct Strategy {
     reason: Option<GoalReason>,
     #[serde(default)]
     comparison_focus: Option<ComparisonFocus>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    phases: Vec<super::schedule::PhaseChoice>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -2785,7 +2789,7 @@ struct Agent {
 const STRATEGIST: Agent = Agent {
     id: "strategy",
     name: "需求策略 Agent",
-    instructions: "confirmed_goal_category 有值时原样采用，reason 为 confirmed_goal。到店对应 visit、认知对应 awareness、促销对应 promotion、拉新对应 acquisition。示例用 visit、commute 或 awareness，reason 为 example_goal。正式需求待确认时返回 angle=unspecified、reason=needs_confirmation。comparison_focus 从 permitted_comparison_focuses 选择。客户指定指标时原样采用。到店、促销、拉新可选择核心圈公交车日 core_bus_days 或目标圈覆盖 coverage，无公交或核心圈未指明时优先 coverage。认知可选择可核验预估人次 estimated_exposure 或 coverage；目标圈较多时可优先 coverage。通勤覆盖使用 coverage，主目标待确认时 comparison_focus 为 null。schedule_candidate_months 非空且目标已确认时，按目标选择 1–3 个待查月份，返回 phases 数组，例如 [{\"month\":\"2027-08\",\"phase\":\"main\"}]。月份和阶段均不重复，按 warmup、main、followup 的先后顺序排列，必须包含 main。未收到可选月份或活动时间依据不足时可省略 phases，不假定任何活动、库存或价格。已明确的 confirmed_schedule 不得更改。只返回 angle、reason、comparison_focus 和可选 phases。按月规划客户可核验的效益。若输入已明确预热、主投或回访的档期，分别围绕小范围验证、核心目标集中覆盖、补足覆盖与复盘。日期和权重取自输入。客户目标与业务指标优先。没有真实活动时点、库存或触达依据时，只提出待核验的候选，不能推定季节需求、成交或转化表现。",
+    instructions: "confirmed_goal_category 有值时原样采用，reason 为 confirmed_goal。到店对应 visit、认知对应 awareness、促销对应 promotion、拉新对应 acquisition。示例用 visit、commute 或 awareness，reason 为 example_goal。正式需求待确认时返回 angle=unspecified、reason=needs_confirmation。comparison_focus 从 permitted_comparison_focuses 选择。客户指定指标时原样采用。到店、促销、拉新可选择核心圈公交车日 core_bus_days 或目标圈覆盖 coverage，无公交或核心圈未指明时优先 coverage。认知可选择可核验预估人次 estimated_exposure 或 coverage；目标圈较多时可优先 coverage。通勤覆盖使用 coverage，主目标待确认时 comparison_focus 为 null。confirmed_schedule 已确定各采购段的起止日期、天数、权重和阶段。默认用 5 月预热、7 月主投、10 月回访，采用输入中的实际档期及权重。只返回 angle、reason、comparison_focus。预热关注小范围验证，主投关注核心目标集中覆盖，回访关注补足覆盖与复盘。客户目标与业务指标优先。没有真实活动、库存或触达依据时，禁止推定季节需求、成交或转化表现。",
 };
 const PLANNER: Agent = Agent {
     id: "combination",
@@ -3235,15 +3239,15 @@ async fn collect_platform(
         {
             if let Some(message) = match state {
                 "login" if task.login.phase == "opening" && proof_only => {
-                    Some("正在验证新云授权。若出现 Edge 登录页，请在该页面完成认证。")
+                    Some("正在验证新云授权。若出现平台登录页，请在该页面完成认证。")
                 }
                 "login"
                     if task.login.phase == "opening" && refresh.redbean.uses_stored_account() =>
                 {
-                    Some("红豆使用服务端预存账号。若 Edge 打开新云登录页，请完成新云认证。")
+                    Some("红豆使用服务端预存账号。若弹出新云登录页，请完成新云认证。")
                 }
                 "login" if task.login.phase == "opening" => {
-                    Some("正在核验两平台授权。若出现 Edge 登录页，请在对应页面完成认证。")
+                    Some("正在核验两平台授权。若出现平台登录页，请在对应页面完成认证。")
                 }
                 "coverage" => Some("正在查询新云覆盖。"),
                 "required_inventory" => Some("正在按档期读取红豆库存，核对客户指定线路。"),
@@ -3346,7 +3350,9 @@ async fn collect_platform(
         "done" if proof_only => "已完成本次新云取证。",
         "needs_review" if proof_only => "新云未返回全部证据，请核对各段缺项或从数据中心补证。",
         "done" | "needs_review" => "未取得有效的平台数据快照。",
-        "error_launch" => "无法打开数据平台。请检查本机 Edge。",
+        "error_launch" => {
+            "无法打开平台浏览器。请检查服务端浏览器组件，交互认证时还需检查服务端图形会话。"
+        }
         "error_connection" => "官方登录页面暂时无法打开，请检查网络后重新获取数据。",
         "error_newcloud_connection" => {
             "无法打开新云平台登录页。请检查新云网络后重试，也可使用本地快照。"
@@ -3537,36 +3543,18 @@ async fn prepare_strategy(
             .expect("confirmed goal")
             .permitted_focuses(&task.options),
     };
-    let schedule = task
+    let booking_windows = task
         .options
         .rolling
         .as_ref()
         .zip(task.options.starts.as_deref())
         .zip(task.options.ends.as_deref())
-        .filter(|_| task.needs_platform_login() && !task.options.proof_only);
-    let (schedule_months, confirmed_schedule) = if let Some(((rolling, starts), ends)) = schedule {
-        let months = if task.options.operations.is_none() && confirmed.is_some() {
-            rolling.candidate_months(starts, ends)
-        } else {
-            Vec::new()
-        };
-        let fixed = if rolling.candidate_months(starts, ends).is_empty()
-            || task.options.operations.is_some()
-        {
-            rolling
-                .windows(starts, ends)
-                .unwrap_or_default()
-                .into_iter()
-                .filter(super::schedule::Window::needs_stock)
-                .map(|window| window.booking_label())
-                .collect()
-        } else {
-            Vec::new()
-        };
-        (months, fixed)
-    } else {
-        (Vec::new(), Vec::new())
-    };
+        .filter(|_| !task.options.proof_only)
+        .and_then(|((rolling, starts), ends)| rolling.windows(starts, ends).ok())
+        .unwrap_or_default()
+        .into_iter()
+        .filter(super::schedule::Window::needs_stock)
+        .collect::<Vec<_>>();
     let scene = json!({
         "industry": task.options.industry.label(),
         "public_brand": task.options.industry.brand(),
@@ -3582,8 +3570,7 @@ async fn prepare_strategy(
         "custom_target_circle_count": task.options.target_centers.len(),
         "assumption_source": goal_source,
         "required_bus_route_count": task.options.required_routes.len(),
-        "schedule_candidate_months": schedule_months,
-        "confirmed_schedule": confirmed_schedule,
+        "confirmed_schedule": booking_windows.iter().map(super::schedule::Window::planning_context).collect::<Vec<_>>(),
     });
     if let Some(decision) = task.strategy {
         task.note(
@@ -3669,35 +3656,13 @@ async fn prepare_strategy(
                 angle.copy().to_owned(),
             ),
         };
-        let phases_applied = suggestion.is_some_and(|plan| {
-            task.options
-                .rolling
-                .as_mut()
-                .is_some_and(|rolling| rolling.adopt_phases(&schedule_months, &plan.phases))
-        });
         let mut adopted = json!(decision);
-        if task.needs_platform_login()
-            && !task.options.proof_only
-            && let Some(windows) = task
-                .options
-                .rolling
-                .as_ref()
-                .zip(task.options.starts.as_deref())
-                .zip(task.options.ends.as_deref())
-                .and_then(|((rolling, starts), ends)| rolling.windows(starts, ends).ok())
-        {
-            let windows = windows
+        if !booking_windows.is_empty() {
+            let windows = booking_windows
                 .iter()
-                .filter(|window| window.needs_stock())
                 .map(super::schedule::Window::booking_label)
                 .collect::<Vec<_>>();
-            let basis = if phases_applied {
-                "Agent 候选档期"
-            } else if !confirmed_schedule.is_empty() {
-                "已填报的投放档期"
-            } else {
-                "按所选时间范围生成的规则候选档期"
-            };
+            let basis = "已采用的分月投放安排";
             task.note(
                 STRATEGY,
                 status,
@@ -3711,11 +3676,9 @@ async fn prepare_strategy(
             STRATEGIST,
             adopted,
             source,
-            phases_applied
-                || suggestion.is_some_and(|plan| {
-                    plan.angle == angle
-                        && (plan.comparison_focus.is_none() || selected_focus.is_some())
-                }),
+            suggestion.is_some_and(|plan| {
+                plan.angle == angle && (plan.comparison_focus.is_none() || selected_focus.is_some())
+            }),
         );
         task.note(STRATEGY, status, note);
         save(store, task, None).await?;

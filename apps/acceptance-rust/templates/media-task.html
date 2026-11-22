@@ -50,10 +50,10 @@
 <dialog class="platform-dialog" data-platform-dialog="{{ task.login.phase }}" aria-labelledby="platform-login-title">
   {% if task.options.proof_only %}
   <h2 id="platform-login-title">认证新云平台</h2>
-  <p>系统正在核验新云授权。若 Edge 打开登录页，请完成认证。工作台按已锁定的 A／B 清单补充线路图与触达证据。</p>
+  <p>系统正在核验新云授权。请在运行工作台的设备上查看平台浏览器并完成认证。工作台按已锁定的 A／B 清单补充线路图与触达证据。</p>
   {% else %}
   <h2 id="platform-login-title">认证数据平台</h2>
-  <p>系统正在分别核验新云和红豆授权。若 Edge 打开登录页，请在对应页面完成认证。</p>
+  <p>系统正在分别核验新云和红豆授权。若运行工作台的设备弹出平台登录页，请在对应页面完成认证。</p>
   {% endif %}
   <ul aria-live="polite">
     <li><span data-platform-check="newcloud">{% if task.login.newcloud %}✓ 已认证{% else %}待认证{% endif %}</span> 新云平台</li>

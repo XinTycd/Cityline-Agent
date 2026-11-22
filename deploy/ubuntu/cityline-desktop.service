@@ -1,0 +1,19 @@
+[Unit]
+Description=Cityline platform authorization desktop
+
+[Service]
+Type=simple
+User=cityline
+Group=cityline
+WorkingDirectory=/var/lib/cityline
+Environment=HOME=/var/lib/cityline
+Environment=XAUTHORITY=/var/lib/cityline/.Xauthority
+ExecStart=/usr/bin/tigervncserver :8 -fg -localhost yes -SecurityTypes VncAuth -PasswordFile /var/lib/cityline/.vnc/passwd -geometry 1440x900 -depth 24 -xstartup /usr/bin/openbox-session
+ExecStop=/usr/bin/tigervncserver -kill :8
+Restart=on-failure
+RestartSec=3s
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

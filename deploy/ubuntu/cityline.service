@@ -1,0 +1,31 @@
+[Unit]
+Description=Cityline proposal workbench
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cityline
+Group=cityline
+WorkingDirectory=/opt/cityline/current
+Environment=CITYLINE_ENV_FILE=/etc/cityline/cityline.env
+Environment=HOME=/var/lib/cityline
+Environment=XDG_RUNTIME_DIR=/run/cityline
+Environment=PLAYWRIGHT_BROWSERS_PATH=/opt/cityline/current/.playwright
+Environment=PATH=/opt/cityline/node/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/bash /opt/cityline/current/scripts/start-cityline.sh /opt/cityline/current/bin/hackson-acceptance
+Restart=on-failure
+RestartSec=3s
+TimeoutStopSec=30s
+StateDirectory=cityline
+StateDirectoryMode=0700
+RuntimeDirectory=cityline
+RuntimeDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

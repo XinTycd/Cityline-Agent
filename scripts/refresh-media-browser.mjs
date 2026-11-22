@@ -124,6 +124,12 @@ async function verifiedCloudSession() {
   }
 }
 
+async function launchBrowser(headless) {
+  const { chromium } = await import('playwright-core');
+  const options = process.platform === 'linux' ? {} : { channel: 'msedge' };
+  return chromium.launch({ ...options, headless });
+}
+
 async function sessions() {
   phase = 'login';
   await status('login');
@@ -165,8 +171,7 @@ async function sessions() {
   }
   // The visible pages are for operator-completed sign-in.
   phase = 'launch';
-  const { chromium } = await import('playwright-core');
-  browser = await chromium.launch({ channel: 'msedge', headless: false });
+  browser = await launchBrowser(false);
   const context = await browser.newContext();
   captureContext = context;
   const newcloud = verifiedCloud ? null : await context.newPage();
@@ -228,8 +233,7 @@ async function addCloudCookies(context, cookie) {
 
 async function screenshotContext() {
   if (captureContext) return captureContext;
-  const { chromium } = await import('playwright-core');
-  browser = await chromium.launch({ channel: 'msedge', headless: true });
+  browser = await launchBrowser(true);
   captureContext = await browser.newContext();
   await addCloudCookies(captureContext, savedCloudSession);
   return captureContext;

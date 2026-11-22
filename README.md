@@ -37,7 +37,7 @@
 | 阶段 | 工作内容 |
 | --- | --- |
 | 需求确认 | 从 4A Brief 提取目标、媒体、档期及必选线路，由操作员核对。 |
-| 需求策略 Agent | 采用已确认的主目标和采购段。客户未指定各段时，在选定时限内提出候选档期。 |
+| 需求策略 Agent | 采用已确认的主目标和采购段。全年默认按 5 月预热、7 月主投、10 月回访执行。 |
 | 数据核验 | 逐项完成两平台授权，按策略确定的档期查询新云覆盖、红豆库存和对应刊例。 |
 | 媒介组合 Agent | 根据策略给出资源组合的核算优先级。Rust 依据库存、刊例和必选线路计算 A/B 采购清单、排期与报价。 |
 | 报告核验 Agent | 基于实际方案比较及证据提出推荐和复核顺序。系统标注缺失的触达、点位坐标或施工条件，最终方案由人工确认。 |
@@ -46,7 +46,7 @@
 
 ## 快速开始
 
-准备支持 Rust Edition 2024 的 [Rust 工具链](https://rust-lang.org/tools/install/)、系统 C 编译工具和 [Node.js 24+](https://nodejs.org/)。正式平台取数使用 Microsoft Edge 与 Playwright Core。
+准备支持 Rust Edition 2024 的 [Rust 工具链](https://rust-lang.org/tools/install/)、系统 C 编译工具和 [Node.js 24+](https://nodejs.org/)。正式平台取数使用 Playwright Core，Windows 使用 Microsoft Edge，Linux 使用 Playwright 配套的 Chromium。
 
 ~~~powershell
 git clone https://github.com/XinTycd/Cityline-Agent.git
@@ -64,6 +64,8 @@ Copy-Item .env.example .env.local
 cargo build --locked --manifest-path apps/acceptance-rust/Cargo.toml
 .\scripts\start-cityline.ps1 -Executable .\apps\acceptance-rust\target\debug\hackson-acceptance.exe
 ~~~
+
+Ubuntu 可从 [部署指南](./deploy/ubuntu/部署指南.md) 获取编译、服务启动、HTTPS 和平台授权步骤。首次部署时可用 [.env.example](./.env.example) 创建服务端配置。已有 Windows 环境可通过本机导出工具迁移配置，再使用 SSH 传输。
 
 ## 配置
 
