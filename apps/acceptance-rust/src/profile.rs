@@ -5,7 +5,7 @@ use axum::{
     response::{IntoResponse, Redirect, Response},
 };
 
-use crate::{auth::User, provider_config, web::render};
+use crate::{auth::User, provider_config, settings::Brand, web::render};
 
 const SIGNED_OUT: &str = "hackson_demo_signed_out=1";
 
@@ -28,7 +28,9 @@ struct Connections {
 
 #[derive(Template)]
 #[template(path = "sign-in.html")]
-struct SignIn;
+struct SignIn {
+    brand: Brand,
+}
 
 pub(crate) async fn page(Extension(user): Extension<User>) -> Response {
     render(Profile {
@@ -48,8 +50,8 @@ pub(crate) async fn connections() -> Response {
             .map(|url| url.to_string()),
     })
 }
-pub(crate) async fn sign_in_page() -> Response {
-    render(SignIn)
+pub(crate) fn sign_in_page(brand: Brand) -> Response {
+    render(SignIn { brand })
 }
 
 pub(crate) async fn sign_in() -> Response {

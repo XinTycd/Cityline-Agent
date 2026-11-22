@@ -1,0 +1,11 @@
+{% macro inputs(stores, window, baseline) %}
+<details class="import-options" data-trial-fields{% if !stores.is_empty() %} open{% endif %}>
+  <summary>试饮扫码统计口径</summary>
+  <p>主目标为到店时可补充。使用脱敏门店代号，三项一并填写。</p>
+  <div class="media-fields">
+    <label>试饮门店范围<input name="trial_stores" maxlength="100" value="{{ stores }}" placeholder="静安核心圈的脱敏试饮门店组"></label>
+    <label>试饮扫码统计窗口<input name="trial_window" maxlength="100" value="{{ window }}" placeholder="各投放段营业日起止，按北京时间分周汇总"></label>
+    <label>试饮扫码基线<input name="trial_baseline" maxlength="100" value="{{ baseline }}" placeholder="同店上线前等长营业期，按相同星期和时段匹配"></label>
+  </div>
+</details>
+{% endmacro %}

@@ -1,0 +1,11 @@
+<div><dt>客户与品牌</dt><dd>{{ campaign.industry.label() }} · {% if !campaign.brief.customer_profile.is_empty() %}{{ campaign.brief.customer_profile }}{% else if campaign.demo %}上海区域连锁饮品品牌，覆盖 12 家示例门店{% else %}品牌类型及规模待确认。{% endif %}</dd></div>
+<div><dt>生意目标</dt><dd>{% if !campaign.brief.objective.is_empty() %}{{ campaign.brief.objective }}{% else if campaign.demo %}提高目标门店的新品试饮参与。{% else %}详细目标待补充。{% endif %}</dd></div>
+<div><dt>投放主目标</dt><dd>{% if !campaign.brief.campaign_goal.is_empty() %}{{ campaign.brief.campaign_goal }}{% else if campaign.demo %}到店 · 便利店新品试饮{% else %}待确认{% endif %}
+  {% if let Some(focus) = campaign.brief.comparison_focus %}<p>客户首要比选指标 · {{ focus.label() }}</p>{% endif %}
+</dd></div>
+<div><dt>目标人群与活动区域</dt><dd>{% if !campaign.brief.audience.is_empty() %}{{ campaign.brief.audience }}{% else if campaign.demo %}18–30 岁通勤白领和周末到访人群。{% else %}目标人群待补充。{% endif %}
+  {% if !campaign.brief.region.is_empty() %}<p>活动区域 · {{ campaign.brief.region }}</p>{% else if campaign.demo %}<p>活动区域 · 徐汇、静安和陆家嘴。</p>{% endif %}
+  {% if !campaign.target_centers.is_empty() %}<p>已确认查询中心 · {{ campaign.target_centers.join("、") }}，半径 {{ crate::media::FOOD_COVERAGE_RADIUS }} 米。</p>{% endif %}
+  {% if let Some(core) = campaign.core_circle %}<p>核心目标圈 · {{ core }}</p>{% endif %}
+  {% if !media_section.is_empty() %}<p><a href="{{ media_section }}">查看目标圈、线路与出口依据</a></p>{% endif %}
+</dd></div>

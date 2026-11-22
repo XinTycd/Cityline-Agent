@@ -9,7 +9,14 @@
         <td><a href="/media-proposals/tasks/{{ task.id }}">{{ task.name() }}</a></td>
         <td>{% if let Some(time) = task.created_at %}<time datetime="{{ time }}+08:00">{{ time }}</time>{% else %}—{% endif %}</td>
         <td>{% if let Some(time) = row.updated_at %}<time datetime="{{ time }}+08:00">{{ time }}</time>{% else %}—{% endif %}</td>
-        <td><span class="badge task-status" data-status="{{ task.list_status() }}">{{ task.list_status() }}</span></td>
+        <td>
+          {% let (status, tone) = task.list_status() %}
+          <span class="badge task-status" data-status="{{ status }}" data-tone="{{ tone }}">{{ status }}</span>
+          {% if let Some(step) = task.running_step() %}<small>{{ step }}</small>{% endif %}
+          {% if task.agent_error && !task.state.active() && !task.is_demo() %}
+          <a class="badge" data-tone="warning" href="/media-proposals/tasks/{{ task.id }}/agent-trace">Agent 已回退</a>
+          {% endif %}
+        </td>
         <td><a href="/media-proposals/tasks/{{ task.id }}" aria-label="查看任务 {{ row.sequence }} 的详情">详情</a></td>
       </tr>
       {% endfor %}

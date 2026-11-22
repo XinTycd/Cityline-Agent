@@ -17,6 +17,7 @@ use super::{Snapshot, visuals::Strategy};
 pub(crate) struct Policy {
     pub(super) emphasis: Priority,
     pub(super) hard_cap: Option<u64>,
+    pub(super) confirmed_focus: bool,
 }
 
 #[derive(Clone, Default, Deserialize, Serialize)]
@@ -80,10 +81,12 @@ impl Portfolio {
         let request = Request {
             data: &snapshot.data,
             target: entry.target,
+            target_band: None,
             hard_cap: entry.cap,
             media,
             priority: strategy.priority(),
             emphasis: Priority::Balanced,
+            confirmed_focus: false,
             months,
             routes,
         };
@@ -122,10 +125,12 @@ pub(super) struct Allocation {
 pub(super) struct Request<'a> {
     pub(super) data: &'a Dataset,
     pub(super) target: u64,
+    pub(super) target_band: Option<(u64, u64)>,
     pub(super) hard_cap: Option<u64>,
     pub(super) media: Selection,
     pub(super) priority: Priority,
     pub(super) emphasis: Priority,
+    pub(super) confirmed_focus: bool,
     pub(super) months: u64,
     pub(super) routes: &'a [String],
 }
@@ -188,11 +193,14 @@ impl Request<'_> {
             .map(|(item, quantity)| *quantity * (item.total.high as f64 / scale))
             .sum();
         let gap = vars.add(variable().min(0));
-        let primary = self
-            .data
-            .coverage
-            .first()
-            .map(|cover| cover.circle.as_str());
+        let band = self.target_band.map(|(low, high)| {
+            (
+                vars.add(variable().min(0)),
+                low as f64 / scale,
+                high as f64 / scale,
+            )
+        });
+        let primary = self.data.core_circle();
         let required: BTreeSet<_> = self
             .routes
             .iter()
@@ -256,9 +264,10 @@ impl Request<'_> {
             Priority::CoreFrequency | Priority::Nearby => 0.12 * near_reward.clone(),
             Priority::Balanced => Expression::default(),
         };
+        let focus_weight = if self.confirmed_focus { 0.05 } else { 0.025 };
         let extra = match self.emphasis {
-            Priority::KeyCircles => 0.025 * coverage_reward,
-            Priority::Nearby | Priority::CoreFrequency => 0.025 * near_reward,
+            Priority::KeyCircles => focus_weight * coverage_reward,
+            Priority::Nearby | Priority::CoreFrequency => focus_weight * near_reward,
             Priority::Balanced => Expression::default(),
         };
         let make_requirement = |group| {
@@ -295,6 +304,10 @@ impl Request<'_> {
             let quote = self.quote(items, fallback);
             let deviation = (quote as f64 / scale - 1.0).abs();
             seed.push((gap, deviation));
+            if let Some((outside, low, high)) = band {
+                let normalized = quote as f64 / scale;
+                seed.push((outside, (low - normalized).max(normalized - high).max(0.0)));
+            }
             for (group, indicator) in coverage.iter().chain(&routes) {
                 seed.push((*indicator, u8::from(group_selected(group)).into()));
             }
@@ -307,15 +320,20 @@ impl Request<'_> {
                 }
             }
         }
-        let mut model = vars
-            .minimise(gap + 3.0 * unmet - benefit - extra)
-            .using(microlp)
-            .with_time_limit(0.7);
+        let mut objective = gap + 3.0 * unmet - benefit - extra;
+        if let Some((outside, _, _)) = band {
+            objective += 2.0 * outside;
+        }
+        let mut model = vars.minimise(objective).using(microlp).with_time_limit(0.7);
         if valid_seed {
             model = model.with_initial_solution(seed);
         }
         model.add_constraint((quoted.clone() - gap).leq(1));
         model.add_constraint((quoted.clone() + gap).geq(1));
+        if let Some((outside, low, high)) = band {
+            model.add_constraint((quoted.clone() - outside).leq(high));
+            model.add_constraint((quoted.clone() + outside).geq(low));
+        }
         if let Some(cap) = self.hard_cap {
             model.add_constraint(quoted.leq(cap as f64 / scale));
         }
@@ -459,13 +477,10 @@ impl Request<'_> {
             let route = is_bus.then(|| plan::bus_route_key(&item.stock.name));
             item.client_required = route.as_ref().is_some_and(|key| required.contains(key));
             if quantity == 0 {
-                excluded.push(Exclusion {
-                    name: item.stock.name.clone(),
-                    why: "有可售记录，未入选当前预算与覆盖目标下的组合",
-                    stock: Some(item.stock),
-                    coverage: item.coverage,
-                    rate: Some(item.rate),
-                });
+                excluded.push(Exclusion::unselected(
+                    item,
+                    "有可售记录，未入选当前预算与覆盖目标下的组合",
+                ));
                 continue;
             }
             if let Some(route) = route {
@@ -519,6 +534,7 @@ mod tests {
 
     fn fixture(rows: &[(Medium, &str, u64, u32, &str, u32)]) -> Dataset {
         let mut data = Dataset {
+            confirmed_core: None,
             stock: Vec::new(),
             empty_inventory: BTreeMap::new(),
             coverage: Vec::new(),
@@ -586,10 +602,12 @@ mod tests {
         let mut request = Request {
             data: &data,
             target: 2_000_000,
+            target_band: None,
             hard_cap: None,
             media: Selection::Both,
             priority: Priority::KeyCircles,
             emphasis: Priority::Balanced,
+            confirmed_focus: false,
             months: 1,
             routes: &routes,
         };
@@ -621,10 +639,12 @@ mod tests {
         let mut request = Request {
             data: &data,
             target: 2_000_000,
+            target_band: None,
             hard_cap: None,
             media: Selection::Both,
             priority: Priority::KeyCircles,
             emphasis: Priority::Balanced,
+            confirmed_focus: false,
             months: 1,
             routes: &[],
         };
@@ -635,5 +655,59 @@ mod tests {
         assert_eq!(b.total.high, 2_000_000);
         assert!(a.items.iter().any(|item| item.stock.name == "10"));
         assert!(b.items.iter().any(|item| item.stock.name == "11"));
+    }
+
+    #[test]
+    fn core_frequency_uses_the_confirmed_circle_even_when_it_is_not_the_first_row() {
+        let mut data = fixture(&[
+            (Medium::Bus, "10", 2_000_000, 1, "甲商圈", 200),
+            (Medium::Bus, "11", 2_000_000, 1, "乙商圈", 250),
+        ]);
+        let find_route = |data: &Dataset| {
+            let request = Request {
+                data,
+                target: 2_000_000,
+                target_band: None,
+                hard_cap: None,
+                media: Selection::Bus,
+                priority: Priority::CoreFrequency,
+                emphasis: Priority::Balanced,
+                confirmed_focus: false,
+                months: 1,
+                routes: &[],
+            };
+            let proposal = request.proposal(&request.solve()).unwrap();
+            assert_eq!(proposal.items.len(), 1);
+            proposal.items[0].stock.name.clone()
+        };
+        assert_eq!(find_route(&data), "10");
+        data.confirmed_core = Some("乙商圈".into());
+        assert_eq!(find_route(&data), "11");
+    }
+
+    #[test]
+    fn confirmed_comparison_focus_can_change_a_close_allocation() {
+        let data = fixture(&[
+            (Medium::Bus, "10", 2_000_000, 1, "核心圈", 800),
+            (Medium::Bus, "11", 1_980_000, 1, "核心圈", 120),
+        ]);
+        let mut request = Request {
+            data: &data,
+            target: 2_000_000,
+            target_band: None,
+            hard_cap: Some(2_000_000),
+            media: Selection::Bus,
+            priority: Priority::KeyCircles,
+            emphasis: Priority::Nearby,
+            confirmed_focus: false,
+            months: 1,
+            routes: &[],
+        };
+        let baseline = request.proposal(&request.solve()).unwrap();
+        request.confirmed_focus = true;
+        let preferred = request.proposal(&request.solve()).unwrap();
+        assert_eq!(baseline.items[0].stock.name, "10");
+        assert_eq!(preferred.items[0].stock.name, "11");
+        assert!(preferred.total.high <= 2_000_000);
     }
 }

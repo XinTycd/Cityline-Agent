@@ -90,6 +90,7 @@
               <label for="provider-timeout">认证超时</label>
               <div class="settings-control settings-number"><input id="provider-timeout" type="number" name="provider_timeout" value="{{ login.provider_timeout }}" min="15" max="300" required><span>秒</span></div>
             </div>
+            <p class="settings-help">外部授权发起后，用户确认、回调和身份核验须在此时限内完成。</p>
             <div class="settings-field">
               <label for="login-callback">回调地址</label>
               <input id="login-callback" type="url" value="{{ callback_url }}" readonly>

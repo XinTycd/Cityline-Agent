@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
-    agents::Agents,
+    agents::{Agents, Role},
     model::Model,
     refresh::{BrowserImport, Refresh},
     settings::Brand,
@@ -44,6 +44,7 @@ const METRO: Medium = Medium::Metro;
 pub(crate) const FOOD_COVERAGE_CENTERS: &str = "上海市静安区南京西路789号|上海市静安区静安寺|上海市黄浦区人民广场|上海市黄浦区新天地|上海市徐汇区徐家汇";
 pub(crate) const FOOD_COVERAGE_RADIUS: u16 = 1500;
 pub(crate) const SHOWCASE_BUDGET: u32 = 200;
+const SHOWCASE_BUDGET_BAND: (u64, u64) = (1_800_000, 2_500_000);
 pub(crate) const SHOWCASE_START: &str = "2027-01-01";
 pub(crate) const SHOWCASE_END: &str = "2027-12-31";
 const SHOWCASE_DATES: &str = "2027-01-01 至 2027-12-31";
@@ -198,6 +199,8 @@ struct Options {
     brief: Option<brief::BriefContext>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     target_centers: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    core_circle: Option<String>,
     #[serde(default)]
     operations: Option<operations::Operations>,
     #[serde(default)]
@@ -216,12 +219,56 @@ struct Options {
     required_routes: Vec<String>,
     #[serde(default)]
     rolling: Option<schedule::Rolling>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    schedule_revision: Option<schedule::ScheduleRevision>,
 }
 
 impl Options {
+    fn campaign_goal(&self) -> Option<&str> {
+        self.brief
+            .as_ref()
+            .and_then(|brief| brief::campaign_goal(&brief.campaign_goal))
+    }
+
+    fn confirmed_comparison_focus(&self) -> Option<collaboration::ComparisonFocus> {
+        self.campaign_goal()?;
+        self.brief.as_ref()?.comparison_focus
+    }
+
+    fn goal_needs_confirmation(&self) -> bool {
+        self.demo != Some(1) && self.campaign_goal().is_none()
+    }
+
     fn requires_operations(&self) -> bool {
         self.operations_required || (self.rolling.is_some() && self.demo != Some(1))
     }
+}
+
+fn budget_band(budget: u32) -> (u64, u64) {
+    if budget == SHOWCASE_BUDGET {
+        SHOWCASE_BUDGET_BAND
+    } else {
+        let target = u64::from(budget) * 10_000;
+        (target - target / 5, target + target / 5)
+    }
+}
+
+fn budget_band_label(budget: impl std::borrow::Borrow<u32>) -> String {
+    let (low, high) = budget_band(*budget.borrow());
+    format!("{}–{} 万元", low / 10_000, high / 10_000)
+}
+
+fn allocation_budget_band(budget: u32, target: u64) -> Option<(u64, u64)> {
+    (budget == SHOWCASE_BUDGET).then(|| {
+        let nominal = u64::from(budget) * 10_000;
+        let (low, high) = budget_band(budget);
+        (target * low / nominal, target * high / nominal)
+    })
+}
+
+fn budget_gap_needs_confirmation(budget: u32, high_quote: u64) -> bool {
+    let (low, high) = budget_band(budget);
+    !(low..=high).contains(&high_quote)
 }
 
 struct Snapshot {
@@ -290,7 +337,7 @@ struct PlanPage {
 
 fn source_label(source: &str) -> &'static str {
     match source {
-        "platform" => "平台实时导出",
+        "platform" => "平台导出快照",
         "manual" => "人工导入",
         _ => "历史快照",
     }
@@ -331,6 +378,8 @@ struct Export<'a> {
     brand: &'a Brand,
     coverage: Vec<ReportCoverage<'a>>,
     variants: Vec<visuals::Variant>,
+    full_evidence: bool,
+    campaign: brief::CampaignView<'a>,
 }
 
 struct ReportCoverage<'a> {
@@ -402,9 +451,11 @@ async fn read_snapshot_matching(
     let batch = options.batch.map(|value| value.to_string());
     let media = options.media.unwrap_or(Selection::Both).mask();
     let requested = options.target_centers.clone();
+    let core = options.core_circle.clone();
     database(move || {
         let db = store.connect()?;
-        let centers = serde_json::to_string(&requested)
+        let required = if requested.is_empty() { core.as_slice() } else { requested.as_slice() };
+        let centers = serde_json::to_string(required)
             .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
         db.query_row(
             "SELECT payload, starts, ends, observed_at, recorded_at, id, source FROM media_snapshots
@@ -430,6 +481,7 @@ async fn read_snapshot_matching(
                     data.coverage.retain(|row| requested.contains(&row.circle)
                         && row.radius == u32::from(FOOD_COVERAGE_RADIUS));
                 }
+                data.confirmed_core.clone_from(&core);
                 Ok(Snapshot {
                     id: Some(row.get(5)?),
                     data,
@@ -542,6 +594,33 @@ fn normalize_options(mut options: Options) -> Result<Options, WebError> {
     if options.industry != Industry::Food {
         return Err(FOOD_ONLY);
     }
+    if let Some(core) = options
+        .core_circle
+        .take()
+        .filter(|value| !value.trim().is_empty())
+    {
+        let selection = if options.target_centers.is_empty() {
+            options
+                .industry
+                .coverage_centers()
+                .split('|')
+                .find(|name| *name == core.trim())
+        } else {
+            options
+                .target_centers
+                .iter()
+                .map(String::as_str)
+                .find(|name| *name == core.trim())
+        };
+        options.core_circle = Some(
+            selection
+                .ok_or((
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "核心目标圈必须是本次查询中心之一。",
+                ))?
+                .to_owned(),
+        );
+    }
     if options
         .hard_cap
         .is_some_and(|amount| !(1..=MAX_EXPLICIT_CAP).contains(&amount))
@@ -624,13 +703,13 @@ async fn load_plan(store: Store, options: Options) -> Result<(Page, Option<Snaps
     let notice = if !valid {
         Some("请选择 2027 年内的有效起止日期。")
     } else if snapshot.is_none() {
-        Some("该档期没有可查看的取数记录，请发起平台取数。")
+        Some("该档期没有可查看的获取数据记录，请先获取平台数据。")
     } else {
         None
     };
     Ok((
         Page {
-            heading: "户外媒体提案工作台",
+            heading: crate::settings::DEFAULT_DESCRIPTION,
             section: "tasks",
             industry: options.industry,
             media,
@@ -753,7 +832,7 @@ async fn plan_page(
     Query(options): Query<Options>,
 ) -> Result<Response, WebError> {
     let mut plan = page_data(store, options).await?;
-    plan.model_available = agents.current().0.is_some();
+    plan.model_available = agents.current().get(Role::Strategy).is_some();
     Ok(render_plan(plan))
 }
 
@@ -767,11 +846,17 @@ fn render_plan(plan: Page) -> Response {
 
 async fn export(
     State(store): State<Store>,
+    Extension(user): Extension<crate::auth::User>,
+    axum::extract::OriginalUri(uri): axum::extract::OriginalUri,
     Query(options): Query<Options>,
 ) -> Result<Response, WebError> {
-    let preview = options.preview == Some(1);
+    let workpaper = uri.path().ends_with("/snapshot-review");
+    if workpaper && !user.admin {
+        return Err((StatusCode::FORBIDDEN, "库存核验副本仅供管理员查阅。"));
+    }
+    let preview = workpaper || options.preview == Some(1);
     let brand = Brand::read(&store).await?;
-    let page = page_data(store, options).await?;
+    let page = page_data(store.clone(), options.clone()).await?;
     let result = page
         .result
         .as_ref()
@@ -784,15 +869,33 @@ async fn export(
             StatusCode::CONFLICT,
             "当前无完整可导出的方案。请核对档期、媒体类型和报价。",
         ))?;
+    if !result.snapshot.data.demo && !workpaper {
+        return Err((StatusCode::CONFLICT, "正式报告由已核验的提案任务发布。"));
+    }
     let variants = variants_for_snapshot(&page, &result.snapshot);
-    let (html, _) = render_export(&page, result, variants, &[], &brand)?;
+    let options = Options {
+        starts: Some(result.snapshot.starts.clone()),
+        ends: Some(result.snapshot.ends.clone()),
+        budget: Some(page.budget),
+        media: Some(page.media),
+        demo: result.snapshot.data.demo.then_some(1),
+        brief: page.brief.clone(),
+        ..options
+    };
+    let html = render_export(&page, result, variants, &[], &brand, &options)?;
+    let timestamp = database(move || crate::web::report_clock(&store.connect()?)).await?;
     export_response(
-        html,
+        crate::web::stamp_report(html, &timestamp),
         preview,
         page.industry,
         page.media,
         page.budget,
         &result.snapshot.starts,
+        if result.snapshot.data.demo {
+            ReportFile::Demo
+        } else {
+            ReportFile::Draft
+        },
     )
 }
 
@@ -869,10 +972,12 @@ fn optimize_snapshot(
             optimizer::Request {
                 data: &snapshot.data,
                 target: u64::from(budget) * 10_000,
+                target_band: allocation_budget_band(budget, u64::from(budget) * 10_000),
                 hard_cap: policy.hard_cap,
                 media: options.media.unwrap_or(Selection::Both),
                 priority: strategy.priority(),
                 emphasis: policy.emphasis,
+                confirmed_focus: policy.confirmed_focus,
                 months: period_months(&snapshot.starts, &snapshot.ends).unwrap_or(1),
                 routes: &options.required_routes,
             },
@@ -913,13 +1018,47 @@ fn optimized_snapshot_variants(
     variants
 }
 
+fn selected_inventory(
+    starts: &str,
+    ends: &str,
+    proposal: &plan::Proposal,
+) -> Option<crate::refresh::InventoryCheck> {
+    if !proposal.complete_media || !proposal.complete_required() || proposal.items.is_empty() {
+        return None;
+    }
+    Some(crate::refresh::InventoryCheck {
+        starts: starts.to_owned(),
+        ends: ends.to_owned(),
+        demands: proposal
+            .items
+            .iter()
+            .map(|item| {
+                let stock = &item.stock;
+                crate::refresh::StockDemand {
+                    medium: match stock.medium {
+                        BUS => "bus",
+                        METRO => "metro",
+                    },
+                    name: stock.name.clone(),
+                    code: stock.code.clone(),
+                    operator: stock.operator.clone(),
+                    grade: stock.grade.clone(),
+                    format: stock.format.clone(),
+                    quantity: item.quantity,
+                }
+            })
+            .collect(),
+    })
+}
+
 fn render_export(
     page: &Page,
     result: &ResultView,
     variants: Vec<visuals::Variant>,
     guidance: &[(&'static str, &'static str)],
     brand: &Brand,
-) -> Result<(String, bool), WebError> {
+    options: &Options,
+) -> Result<String, WebError> {
     let coverage = result
         .proposal
         .items
@@ -949,10 +1088,17 @@ fn render_export(
         brand,
         coverage,
         variants,
+        full_evidence,
+        campaign: brief::CampaignView::new(options),
     }
     .render()
-    .map(|html| (html, full_evidence || result.snapshot.data.demo))
     .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "无法渲染方案 HTML。"))
+}
+
+enum ReportFile {
+    Demo,
+    Draft,
+    Confirmed,
 }
 
 fn export_response(
@@ -962,11 +1108,17 @@ fn export_response(
     media: Selection,
     budget: u32,
     starts: &str,
+    file: ReportFile,
 ) -> Result<Response, WebError> {
     let mut response = crate::web::report_response(html);
     if !preview {
+        let status = match file {
+            ReportFile::Demo => "",
+            ReportFile::Draft => "draft-",
+            ReportFile::Confirmed => "confirmed-",
+        };
         let name = format!(
-            "attachment; filename=cityline-{}-{}-{}w-{}.html",
+            "attachment; filename=cityline-{status}{}-{}-{}w-{}.html",
             industry.id(),
             media.id(),
             budget,
@@ -1085,6 +1237,7 @@ fn make_dataset(mut files: Uploads, scope: ImportScope<'_>) -> Result<Dataset, &
         official_inventory,
     } = scope;
     let mut dataset = Dataset {
+        confirmed_core: None,
         stock: Vec::new(),
         empty_inventory: BTreeMap::new(),
         coverage: Vec::new(),
@@ -1222,8 +1375,61 @@ fn make_dataset(mut files: Uploads, scope: ImportScope<'_>) -> Result<Dataset, &
         .and_then(|mut uploads| uploads.pop())
         .ok_or("请上传脱敏刊例价表。")?;
     dataset.rates = import::rates(&import::Table::read(rates.file, &rates.bytes)?)?;
+    dataset
+        .evidence
+        .shapes
+        .extend(dataset.stock.iter().filter_map(|row| {
+            if row.medium != METRO {
+                return None;
+            }
+            let shape = specs
+                .get(&plan::key(&row.code))?
+                .exit_shape(row, official_inventory)?;
+            (!shape.repeats_stock_station(row, &dataset.coverage)).then_some(shape)
+        }));
     update_evidence(&mut dataset, files)?;
     Ok(dataset)
+}
+
+#[cfg(test)]
+mod import_tests {
+    use super::{ImportScope, Upload, make_dataset};
+
+    #[test]
+    fn redbean_spec_coordinates_require_matching_outlet_and_declared_crs() {
+        let files = || {
+            [
+                ("metro_stock", "地铁编号,地铁站名,出入口号,级别,空车数\nS01,测试站,A,A+,1\nS02,测试站,B,A+,1\nS03,测试站,C,A+,1\nS04,测试站,D,A+,1"),
+                ("metro_specs", "地铁编号,地铁站名,出入口号,级别,面积,粘贴形式,坐标,坐标系\nS01,测试站,A,A+,9,灯箱,\"121.455,31.227\",BD-09\nS02,测试站,B,A+,9,灯箱,\"121.455,31.227\",\nS03,测试站,C,A+,9,灯箱,\"121.450,31.220\",BD-09\nS04,测试站,D,A+,9,灯箱,\"121.460,31.230\",GCJ-02\nS99,测试站,E,A+,9,灯箱,\"121.470,31.230\",BD-09"),
+                ("combined_coverage", "明细分析\n中心点名称,媒体类型,媒体名称,覆盖半径,最近距离,最近站点,站点经度,站点纬度\n测试圈,地铁出入口,地铁1号线,500米,100米,测试站,121.450,31.220"),
+                ("rates", "媒体类型,匹配对象,发布费,计价数量,计价周期,制作费\n地铁出入口,A+,约15–25万,1,1月,100元/㎡"),
+            ]
+            .into_iter()
+            .map(|(field, csv)| (field.into(), vec![Upload { file: format!("{field}.csv"), bytes: csv.as_bytes().to_vec() }]))
+            .collect()
+        };
+        for official_inventory in [false, true] {
+            let data = make_dataset(
+                files(),
+                ImportScope {
+                    circle: "",
+                    radius: 0,
+                    metro_station: "",
+                    cover_center: "测试圈",
+                    supplemental_metro_center: "",
+                    required_routes: &[],
+                    official_inventory,
+                },
+            )
+            .unwrap();
+            assert_eq!(data.evidence.shapes.len(), 1);
+            assert_eq!(data.evidence.shapes[0].resource, "S01");
+            assert_eq!(
+                data.evidence.shapes[0].platform_verified,
+                official_inventory
+            );
+        }
+    }
 }
 
 fn read_evidence(mut files: Uploads) -> Result<visuals::Evidence, &'static str> {
@@ -1235,7 +1441,15 @@ fn read_evidence(mut files: Uploads) -> Result<visuals::Evidence, &'static str> 
         .remove("route_geometry")
         .and_then(|mut files| files.pop())
     {
-        additions.shapes = visuals::read_shapes(file.file, &file.bytes)?;
+        let name = file.file.to_ascii_lowercase();
+        additions.shapes = if [".csv", ".xlsx", ".xls"]
+            .iter()
+            .any(|ext| name.ends_with(ext))
+        {
+            import::metro_exit_points(&import::Table::read(file.file, &file.bytes)?)?
+        } else {
+            visuals::read_shapes(file.file, &file.bytes)?
+        };
     }
     if let Some(file) = files
         .remove("official_maps")
@@ -1247,9 +1461,12 @@ fn read_evidence(mut files: Uploads) -> Result<visuals::Evidence, &'static str> 
 }
 
 fn update_evidence(dataset: &mut Dataset, files: Uploads) -> Result<(), &'static str> {
-    dataset
-        .evidence
-        .supplement(read_evidence(files)?, &dataset.stock)
+    let mut additions = read_evidence(files)?;
+    for map in &mut additions.maps {
+        map.basemap_verified = false;
+    }
+    additions.check_exit_points(&dataset.stock, &dataset.coverage)?;
+    dataset.evidence.supplement(additions, &dataset.stock)
 }
 
 #[derive(Deserialize)]
@@ -1264,6 +1481,9 @@ async fn supplement(
     Query(context): Query<SupplementContext>,
     body: Multipart,
 ) -> Result<Redirect, WebError> {
+    if let Some(task) = context.task {
+        tasks::check_supplement_context(&store, task, id).await?;
+    }
     let (fields, files) = receive(body).await?;
     if fields.len() != 1
         || fields.get("attested").is_none_or(|value| value != "yes")
@@ -1295,7 +1515,7 @@ async fn supplement(
             return Ok(Err((StatusCode::NOT_FOUND, "未找到数据快照。")));
         };
         if refresh_id.as_deref().and_then(|id| id.parse().ok()).is_some_and(|id| refresh.is_active(id)) {
-            return Ok(Err((StatusCode::CONFLICT, "此快照正在接收平台数据，请在取数完成后补证。")));
+            return Ok(Err((StatusCode::CONFLICT, "此快照正在接收平台数据，请在获取数据完成后补证。")));
         }
         let mut dataset: Dataset = serde_json::from_str(&previous).map_err(|error| {
             rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(error))
@@ -1312,7 +1532,7 @@ async fn supplement(
                  FROM media_snapshots WHERE id=?4",
                 params![next, payload, root, base],
             )?;
-            crate::audit::write(&tx, "平台", "补充线路和触达证据", None,
+            crate::audit::write(&tx, "平台", "补充线路和触达证据", context.task,
                 &format!("原快照 {base} · 新快照 {next} · 操作入口 {id}"))?;
             next
         } else {
@@ -1327,12 +1547,18 @@ async fn supplement(
             "/media-data?batch={saved}&task={task}"
         )));
     }
-    Ok(Redirect::to("/media-data"))
+    Ok(Redirect::to(&format!("/media-data?batch={saved}")))
+}
+
+#[derive(Deserialize)]
+struct ImportView {
+    view: Option<String>,
 }
 
 async fn upload(
     State(store): State<Store>,
     worker: Option<Extension<BrowserImport>>,
+    Query(view): Query<ImportView>,
     body: Multipart,
 ) -> Result<Redirect, WebError> {
     let (fields, files) = receive(body).await?;
@@ -1359,7 +1585,7 @@ async fn upload(
     };
     const REQUEST_MISMATCH: WebError = (
         StatusCode::UNPROCESSABLE_ENTITY,
-        "平台导出与本次取数条件不一致。",
+        "平台导出与本次获取数据的条件不一致。",
     );
     if let Some(worker) = &worker {
         let request = &worker.request;
@@ -1454,7 +1680,7 @@ async fn upload(
             params![proposed, industry, starts, ends, observed, anonymize_food_case(&payload).as_ref(), source, refresh_id, selected.mask()],
         )?;
         let id: String = if written == 1 {
-            let batch = refresh_id.as_deref().map(|id| format!(" · 取数批次 {id}")).unwrap_or_default();
+            let batch = refresh_id.as_deref().map(|id| format!(" · 获取数据批次 {id}")).unwrap_or_default();
             crate::audit::write(&tx, "平台", "导入快照", None, &format!("{} · {industry} · {starts} 至 {ends} · 快照 {proposed}{batch}", source_label(source)))?;
             proposed
         } else {
@@ -1463,6 +1689,9 @@ async fn upload(
         tx.commit()?;
         Ok((id, starts, ends))
     }).await?;
+    if worker.is_none() && view.view.as_deref() == Some("data") {
+        return Ok(Redirect::to(&format!("/media-data?batch={id}")));
+    }
     let url = format!(
         "/media-proposals?industry={industry}&media={}&starts={starts}&ends={ends}&batch={id}",
         selected.id()
@@ -1477,8 +1706,11 @@ fn synthetic(industry: Industry) -> Snapshot {
     };
     let mut stock = Vec::new();
     let mut coverage = Vec::new();
+    let mut exposure = Vec::new();
+    let core = format!("{} · 试饮核心商圈", industry.brand());
     for index in 1..=32 {
         let medium = if index % 2 == 0 { BUS } else { METRO };
+        let near_core = matches!(index % 8, 1 | 2);
         let name = format!("示例{} {:02}", medium.label(), index);
         let format = if medium == BUS { "大三侧" } else { "灯箱" };
         stock.push(Inventory {
@@ -1491,9 +1723,24 @@ fn synthetic(industry: Industry) -> Snapshot {
             operator: String::new(),
             grade: "A+".into(),
             format: format.into(),
-            free: u32::from(index != 5),
+            free: if near_core && medium == BUS {
+                3
+            } else {
+                u32::from(index != 5)
+            },
             area: Some(10),
             source: source("合成库存表", index + 1),
+        });
+        exposure.push(visuals::Reach {
+            medium,
+            resource: name.clone(),
+            month: 6,
+            daily: 3_000 + index as u32 * 113,
+            reference: "合成样例单位日触达".into(),
+            source: source("合成触达表", index + 1),
+            baseline: false,
+            unit_verified: true,
+            platform_verified: false,
         });
         coverage.push(Cover {
             center_point: None,
@@ -1505,15 +1752,27 @@ fn synthetic(industry: Industry) -> Snapshot {
             operator: String::new(),
             format: format.into(),
             radius: 500,
-            distance: None,
-            circle: format!("{} · 示例圈 {}", industry.brand(), index % 6 + 1),
+            distance: Some(if near_core {
+                100 + index as u32 * 4
+            } else {
+                250 + index as u32 * 5
+            }),
+            circle: if near_core {
+                core.clone()
+            } else {
+                format!("{} · 示例圈 {}", industry.brand(), index % 6 + 1)
+            },
             source: source("合成覆盖表", index + 1),
         });
     }
     Snapshot {
         id: None,
         data: Dataset {
-            evidence: visuals::Evidence::default(),
+            confirmed_core: Some(core),
+            evidence: visuals::Evidence {
+                reach: exposure,
+                ..Default::default()
+            },
             stock,
             empty_inventory: BTreeMap::new(),
             coverage,
@@ -1568,9 +1827,9 @@ async fn strategy(
     Extension(agents): Extension<Agents>,
     Form(options): Form<Options>,
 ) -> Result<Response, WebError> {
-    let model = agents
-        .current()
-        .0
+    let models = agents.current();
+    let model = models
+        .get(Role::Strategy)
         .ok_or((StatusCode::SERVICE_UNAVAILABLE, "策略模型尚未配置。"))?;
     let mut page = page_data(store.clone(), options).await?;
     page.model_available = true;
@@ -1627,6 +1886,7 @@ pub(crate) fn router(store: Store, agents: Agents, refresh: crate::refresh::Refr
         .merge(platform::router())
         .route("/media-plans", get(plan_page))
         .route("/media-proposals/export", get(export))
+        .route("/media-proposals/snapshot-review", get(export))
         .route("/media-proposals/strategy", post(strategy))
         .route(
             "/api/media-proposals/snapshots/{id}/evidence",

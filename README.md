@@ -70,9 +70,13 @@ cargo build --locked --manifest-path apps/acceptance-rust/Cargo.toml
 | --- | --- |
 | 服务和 SQLite | 默认监听 `127.0.0.1:3412`，数据写入 `.operations-data/cityline.sqlite`。可用 `ACCEPTANCE_RUST_PORT` 和 `ACCEPTANCE_RUST_DATA` 覆盖。 |
 | 媒体刊例 | 将 `CITYLINE_CONTEST_TARIFF` 指向有权使用的 Excel 刊例表。 |
-| 新云和红豆 | 在 `.env.local` 配置 `CITYLINE_NEWCLOUD_ORIGIN`、`CITYLINE_REDBEAN_ORIGIN` 及授权资料中的接口路径。新云用于核对覆盖、线路图和触达，红豆用于核对档期库存与点位规格。 |
-| 模型接入 | 在「Agent 配置 → 模型接入」选择服务端配置、云端模型、本地模型或本地规则，可测试 Chat Completions 接口。Windows 上可从界面保存 API Key，也可通过环境变量注入。 |
+| 新云和红豆 | 在 `.env.local` 配置 `CITYLINE_NEWCLOUD_ORIGIN`、`CITYLINE_REDBEAN_ORIGIN` 及授权资料中的接口路径。新云用于核对覆盖、线路图和触达，红豆用于核对档期库存与点位规格。默认按采购档期及入选资源查询新云 2023 年对应月，缺项再查同一资源的 5 月单位日触达，并在报告标明基准。可通过 `CITYLINE_NEWCLOUD_REACH_MONTHS` 限制已确认开放的月份。 |
+| 模型接入 | 在「Agent 配置 → 模型接入」选择服务端配置、云端或本地模型。三个角色可共享模型，也可分别配置并测试连接。Windows 上可从界面保存 API Key，也可通过环境变量注入。 |
 | 登录与授权 | 「系统设置」支持本地管理员登录、OIDC 和飞书登录，也可独立管理红豆库存授权。外部登录需配置 HTTPS 站点地址、回调和允许登录的用户。 |
+
+正式报告在 A／B 两案均具备平台库存与取证记录、完成库存复核和人工确认后开放。缺项可在任务页的核验清单查看。导出的单个 HTML 文件包含样式、图像和交互，可离线打开。报告页眉、指标条和打印样式移植自开源报告模板，许可证随文件内嵌。[模板来源](https://github.com/langchain-ai/paid-media-agent/blob/d4ee460b729ae6a9a7c0fb0e84e7ab07756fd5ee/src/paid_media_agent/reports/templates/report.html.j2)
+
+红豆规格表可以带「出口坐标」或「坐标」列，每行填写经度、纬度，并在「出口坐标系」或「坐标系」列标明 `BD-09`。工作台按地铁编号与同批库存匹配，跳过无坐标系、超出上海范围或与站点重合的坐标。
 
 任务、审计、配置、快照及报告版本存放在 SQLite。预算重算沿用同一批库存和刊例，补证保留原报告并生成复核版本，便于追溯数据来源和方案差异。
 

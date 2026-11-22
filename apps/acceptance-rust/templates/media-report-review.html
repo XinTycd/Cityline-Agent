@@ -1,0 +1,6 @@
+{% if !guidance.is_empty() %}
+<details class="report-evidence">
+  <summary>查看核验依据</summary>
+  <dl class="report-guidance">{% for (label, text) in guidance %}{% if *label != "A／B 推荐结论" %}<div><dt>{{ label }}</dt><dd>{{ text }}</dd></div>{% endif %}{% endfor %}</dl>
+</details>
+{% endif %}

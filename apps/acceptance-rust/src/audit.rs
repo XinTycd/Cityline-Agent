@@ -178,7 +178,13 @@ async fn page(
     let task = filters.task;
     let filters = (category.clone(), q.clone(), task.map(|id| id.to_string()));
     let (events, pages) = database(move || {
-        const MATCHED: &str = "FROM audit_events WHERE (?1='' OR category=?1)
+        // Display the current wording for historical entries and their search results.
+        const MATCHED: &str = "FROM (
+            SELECT id, created_at, category, task_id,
+                   replace(replace(action,'取数','获取数据'),'获获取数据','获取数') AS action,
+                   replace(replace(detail,'取数','获取数据'),'获获取数据','获取数') AS detail
+            FROM audit_events
+        ) AS audit_events WHERE (?1='' OR category=?1)
             AND (?2='' OR instr(action,?2)>0 OR instr(detail,?2)>0 OR instr(coalesce(task_id,''),?2)>0)
             AND (?3 IS NULL OR task_id=?3)";
         let mut db = store.connect()?;

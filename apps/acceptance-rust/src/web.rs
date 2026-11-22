@@ -11,13 +11,20 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use sha2::{Digest, Sha256};
 
 use crate::{
-    agents::Agents, audit, auth::Auth, media, profile, refresh, settings::Settings, store::Store,
+    agents::Agents,
+    audit,
+    auth::Auth,
+    media, profile, refresh,
+    settings::{DEFAULT_DESCRIPTION, LEGACY_DESCRIPTIONS, Settings},
+    store::Store,
 };
 
 pub(crate) const LOGO: &str = include_str!("../assets/cityline.svg");
 pub(crate) const CSS: &str = include_str!("../assets/workbench.css");
 const REPORT_POLICY: &str = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; frame-ancestors 'none'; form-action 'none'";
 const REPORT_DOCUMENT_STYLE: &str = include_str!("../assets/report-document.css");
+const PAID_MEDIA_REPORT_STYLE: &str = include_str!("../assets/paid-media-report.css");
+const PAID_MEDIA_REPORT_LICENSE: &str = include_str!("../assets/paid-media-report-LICENSE.txt");
 const REPORT_MAP_STYLE: &str = include_str!("../assets/report-map.css");
 const REPORT_MAP_SCRIPT: &str = include_str!("../assets/report-map.js");
 const POLICY: &str = "default-src 'none'; style-src 'self'; img-src 'self'; script-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'";
@@ -34,9 +41,59 @@ fn workspace_policy(avatar: Option<&reqwest::Url>) -> HeaderValue {
 pub(crate) type WebError = (StatusCode, &'static str);
 pub(crate) const LIST_LIMIT: usize = 50;
 const PAGE_SIZES: [u32; 4] = [10, 20, 50, 100];
+pub(crate) const REPORT_TIME_MARKER: &str = "<!-- cityline-report-generated -->";
 
-pub(crate) fn report_response(html: String) -> Response {
+pub(crate) fn stamp_report(html: String, timestamp: &str) -> String {
+    let local = timestamp.get(..19).unwrap_or(timestamp).replace('T', " ");
+    let time = format!(
+        "<p class=\"report-generated\">报告生成时间 <time datetime=\"{timestamp}\">{local}</time>（北京时间）</p>"
+    );
+    if html.contains(REPORT_TIME_MARKER) {
+        return html.replacen(REPORT_TIME_MARKER, &time, 1);
+    }
+    const HEADER: &str = "</header>";
+    html.replacen(HEADER, &format!("{HEADER}\n{time}"), 1)
+}
+
+pub(crate) fn report_clock(db: &rusqlite::Connection) -> rusqlite::Result<String> {
+    db.query_row(
+        "SELECT strftime('%Y-%m-%dT%H:%M:%S+08:00','now','+8 hours')",
+        [],
+        |row| row.get(0),
+    )
+}
+
+pub(crate) fn report_response(mut html: String) -> Response {
     const META: &str = "<meta http-equiv=\"Content-Security-Policy\" content=\"";
+    const LEGACY_TASK_TONES: [&str; 3] = [
+        r#", .task-status[data-status="已完成"]"#,
+        r#", .task-status:is([data-status="待审核"], [data-status="待核对"])"#,
+        r#", .task-status:is([data-status="失败"], [data-status="已退回"])"#,
+    ];
+    if let Some((prefix, rest)) = html.split_once("<style>")
+        && let Some((style, _)) = rest.split_once("</style>")
+        && style.contains(".task-status")
+    {
+        let start = prefix.len() + "<style>".len();
+        let end = start + style.len();
+        let style = LEGACY_TASK_TONES
+            .iter()
+            .fold(style.to_owned(), |css, selector| css.replace(selector, ""));
+        html.replace_range(start..end, &style);
+    }
+    // Update historical report headers without rewriting their stored contents.
+    if let Some((prefix, rest)) = html.split_once("<header class=\"report-header\">")
+        && let Some((header, _)) = rest.split_once("</header>")
+        && let Some((before, rest)) = header.split_once("<small>")
+        && let Some((description, _)) = rest.split_once("</small>")
+        && LEGACY_DESCRIPTIONS.contains(&description)
+    {
+        let start = prefix.len()
+            + "<header class=\"report-header\">".len()
+            + before.len()
+            + "<small>".len();
+        html.replace_range(start..start + description.len(), DEFAULT_DESCRIPTION);
+    }
     // Browsers normalize CRLF before computing the hash of inline scripts.
     let script = REPORT_MAP_SCRIPT.replace("\r\n", "\n");
     let hash = STANDARD.encode(Sha256::digest(script.as_bytes()));
@@ -45,7 +102,7 @@ pub(crate) fn report_response(html: String) -> Response {
         .replacen(META, &format!("{META}{script_policy}; "), 1)
         .replacen(
             "</head>",
-            &format!("<style id=\"cityline-report-ui\">{REPORT_DOCUMENT_STYLE}\n{REPORT_MAP_STYLE}</style>\n</head>"),
+            &format!("<style id=\"cityline-report-ui\">{REPORT_DOCUMENT_STYLE}\n{PAID_MEDIA_REPORT_STYLE}\n{REPORT_MAP_STYLE}\n/*\n{PAID_MEDIA_REPORT_LICENSE}\n*/</style>\n</head>"),
             1,
         )
         .replacen("</body>", &format!("<script>{script}</script>\n</body>"), 1);
@@ -149,12 +206,21 @@ async fn local_only(State(guard): State<Guard>, mut request: Request, next: Next
         .any(|host| authority == Some(&format!("{host}:{port}")));
     let path = request.uri().path();
     let import = if request.headers().contains_key("x-cityline-media-import") {
-        let proof = path == "/api/media-proposals/platform-evidence";
-        let route = (path == "/api/media-proposals/import" && request.method() == Method::POST)
-            || (proof && matches!(*request.method(), Method::GET | Method::POST));
-        let authorized = (route && loopback)
-            .then(|| guard.refresh.authorized(request.headers(), proof))
-            .flatten();
+        let access = match (path, request.method()) {
+            ("/api/media-proposals/import", &Method::POST) => {
+                Some(refresh::WorkerAccess::Inventory)
+            }
+            ("/api/media-proposals/platform-evidence", &Method::GET | &Method::POST) => {
+                Some(refresh::WorkerAccess::Evidence)
+            }
+            (refresh::NEWCLOUD_SESSION_PATH, &Method::POST) => {
+                Some(refresh::WorkerAccess::NewcloudSession)
+            }
+            _ => None,
+        };
+        let authorized = access
+            .filter(|_| loopback)
+            .and_then(|access| guard.refresh.authorized(request.headers(), access));
         let Some(authorized) = authorized else {
             return StatusCode::FORBIDDEN.into_response();
         };
@@ -255,7 +321,7 @@ async fn local_only(State(guard): State<Guard>, mut request: Request, next: Next
 }
 
 pub(crate) fn app(port: u16, store: Store, agents: Agents, settings: Settings) -> Router {
-    let refresh = refresh::Refresh::new(port);
+    let refresh = refresh::Refresh::new(port, store.directory().join("browser-refresh"));
     let auth = settings.auth.clone();
     let guard = Guard {
         port,
@@ -267,7 +333,7 @@ pub(crate) fn app(port: u16, store: Store, agents: Agents, settings: Settings) -
         .route("/", get(|| async { Redirect::to("/media-proposals") }))
         .route("/profile", get(profile::page))
         .route("/connections", get(profile::connections))
-        .merge(crate::auth::router(auth))
+        .merge(crate::auth::router(auth).layer(axum::Extension(refresh.clone())))
         .merge(crate::settings::router(settings).layer(axum::Extension(refresh.clone())))
         .merge(media::router(
             store.clone(),

@@ -4,17 +4,17 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="robots" content="noindex,nofollow">
-  <title>进入工作台 · 城线</title>
+  <title>进入工作台 · {{ brand.name }}</title>
   <script src="/assets/workspace.js"></script>
-  <link rel="icon" href="/assets/cityline.svg" type="image/svg+xml">
+  <link rel="icon" href="/assets/site-logo.png">
   <link rel="stylesheet" href="/assets/workbench.css">
 </head>
 <body class="signed-out">
   <main>
     <section class="panel sign-in-panel" aria-labelledby="sign-in-title">
       <div class="profile-identity">
-        <img class="sign-in-logo" src="/assets/cityline.svg" alt="" width="42" height="42">
-        <div><h1 id="sign-in-title">城线</h1><p>{{ crate::settings::DEFAULT_DESCRIPTION }}</p></div>
+        <img class="sign-in-logo" src="/assets/site-logo.png" alt="" width="42" height="42">
+        <div><h1 id="sign-in-title">{{ brand.name }}</h1><p>{{ brand.description }}</p></div>
       </div>
       <form method="post" action="/demo/sign-in"><button type="submit">进入工作台</button></form>
     </section>

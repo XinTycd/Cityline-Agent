@@ -2,31 +2,48 @@
 {% block title %}{{ page.industry.brand() }}投放提案 · {{ brand.name }}{% endblock %}
 {% block report_nav %}
 <nav aria-label="报告目录">
-  <a href="#summary">方案总览</a>
+  <a href="#summary">总览</a>
+  <a href="#brand-understanding">客户与目标</a>
   <a href="#proposal-variants">方案 A／B</a>
-  <a href="#media-operator">公司简介</a>
   <a href="#verified-coverage">媒体核验</a>
-  <a href="#delivery-options">增值权益与交付</a>
+  <a href="#delivery-options">交付</a>
 </nav>
 {% endblock %}
 {% block report_content %}
     <section class="panel report-cover" aria-labelledby="summary">
       <div class="report-cover-head">
         <h1 id="summary">上海户外媒体投放方案</h1>
-        <p>{{ page.industry.brand() }} · {{ page.industry.label() }}</p>
+        <p>{% if !campaign.brief.objective.is_empty() %}{{ campaign.brief.objective }}{% else %}{{ page.industry.brand() }} · {{ page.industry.label() }}{% endif %}</p>
+        <!-- cityline-report-generated -->
       </div>
-    {% if !result.proposal.complete_required() || !result.proposal.complete_media %}
-    <p class="media-notice report-draft"><strong>备选草案 · 待客户确认</strong> 当前组合无法满足全部必选线路或媒体要求。请先核对线路、档期及预算，再确认投放。{% if !result.proposal.required_routes.is_empty() %}<a href="#required-routes">查看必选线路核验</a>{% else %}<a href="#proposal-variants">查看方案 A／B</a>{% endif %}</p>
+    {% if result.snapshot.data.demo %}
+    <p class="media-notice report-draft" data-demo-report><strong>合成样例 · 仅供演示</strong>。库存、报价和效果数据用于展示工作台流程。</p>
+    {% else if guidance.is_empty() %}
+    <p class="media-notice report-draft"><strong>库存快照预览</strong>。本页展示所选快照的采购组合与报价。</p>
+    {% else if !result.proposal.complete_required() || !result.proposal.complete_media %}
+    <p class="media-notice report-draft"><strong>媒介与档期条件</strong>。当前组合无法满足全部必选线路或媒体要求。{% if !result.proposal.required_routes.is_empty() %}<a href="#required-routes">查看必选线路核验</a>{% else %}<a href="#proposal-variants">查看方案 A／B</a>{% endif %}</p>
+    {% else if !full_evidence %}
+    <p class="media-notice report-draft"><strong>投放证据说明</strong>。各案所用的线路、点位和触达依据见方案明细。</p>
     {% endif %}
-    <dl class="media-stats report-overview">
-      <div><dt>客户预算量级</dt><dd>约 {{ page.budget }} 万元</dd></div>
-      <div><dt>可选媒体</dt><dd class="report-media-label">{{ page.media.label() }}</dd></div>
-      <div><dt>投放档期</dt><dd class="report-dates"><span>{{ result.snapshot.starts }}</span><span>至 {{ result.snapshot.ends }}</span></dd></div>
+    <h2 class="report-overview-title">报告数据一览</h2>
+    <dl class="media-stats report-overview metric-strip">
+      <div class="metric-tile"><dt>客户预算量级</dt><dd>约 {{ page.budget }} 万元</dd><dd><small>报价参考 {{ crate::media::budget_band_label(page.budget) }}</small></dd></div>
+      <div class="metric-tile"><dt>媒体范围</dt><dd class="report-media-label">{{ page.media.label() }}</dd></div>
+      <div class="metric-tile"><dt>投放档期</dt><dd class="report-dates"><span>{{ result.snapshot.starts }}</span><span>至 {{ result.snapshot.ends }}</span></dd></div>
     </dl>
+    <p class="report-caption"><a href="#purchase-detail">查阅档期库存与报价</a></p>
+    {% include "media-report-overview.html" %}
+    {% include "media-report-recommendation.html" %}
+    </section>
+    <section class="panel" id="brand-understanding" aria-labelledby="brief-heading">
+      <h2 id="brief-heading">品牌与投放目标</h2>
+      {% let media_section = "#proposal-variants" %}
+      <dl class="report-guidance" aria-label="品牌与目标">{% include "media-client-fields.html" %}</dl>
+      <p><a href="#measurement">查看监测与验收约定</a></p>
     </section>
     {% include "media-variants.html" %}
-    <section class="panel" aria-labelledby="media-operator">
-      <h2 id="media-operator">公司简介</h2>
+    <details class="panel report-supporting-data" id="media-operator">
+      <summary>公司简介</summary>
       <p>上海新云传媒成立于 1997 年，运营覆盖城市核心商圈及公交、地铁等出行场景的户外媒体。</p>
       <dl class="media-stats report-network">
         <div><dt>公交车身运营规模</dt><dd>近 5,000 台</dd></div>
@@ -34,16 +51,7 @@
         <div><dt>商圈媒体面积</dt><dd>近 10,000 平方米</dd></div>
       </dl>
       <p class="report-caption">来源为赛题资料包「00 企业介绍」。此处展示运营规模，具体可售资源见本案排期与明细。</p>
-    </section>
-    <section class="panel" aria-labelledby="brand-understanding">
-      <h2 id="brand-understanding">品牌与投放场景</h2>
-      <dl class="report-guidance">
-        <div><dt>客户画像</dt><dd>{{ page.industry.brand() }} · 脱敏演示</dd></div>
-        {% if let Some(context) = page.brief %}
-          {% if !context.objective.is_empty() %}<div><dt>客户目标</dt><dd>{{ context.objective }}</dd></div>{% else %}<div><dt>策划目标</dt><dd>{{ page.industry.campaign() }}</dd></div>{% endif %}
-        {% else %}<div><dt>策划目标</dt><dd>{{ page.industry.campaign() }}</dd></div>{% endif %}
-      </dl>
-    </section>
+    </details>
     {% let view = result %}
     {% let industry = page.industry %}
     {% let budget = page.budget %}
@@ -103,34 +111,18 @@
       </div>
       <p><a href="#media-items">展开库存、覆盖分析与报价原表依据</a></p>
     </section>
+    {% let show_excluded = false %}
     {% include "media-result.html" %}
     </details>
-    {% if !guidance.is_empty() %}
-    <section class="panel" aria-labelledby="proposal-guidance">
-      <h2 id="proposal-guidance">提案思路</h2>
-      <dl class="report-guidance">{% for (label, text) in guidance %}
-        <div><dt>{{ label }}</dt><dd>{{ text }}</dd></div>
-      {% endfor %}</dl>
-    </section>
-    {% endif %}
-    {% if let Some(brief) = page.brief %}{% if !brief.region.is_empty() || !brief.monitoring.is_empty() %}
-    <section class="panel" aria-labelledby="brief-context">
-      <h2 id="brief-context">客户需求与约定</h2>
-      <dl class="report-guidance">
-        {% if !brief.region.is_empty() %}<div><dt>客户意向区域</dt><dd>{{ brief.region }}</dd></div>{% endif %}
-        {% if !brief.monitoring.is_empty() %}<div><dt>监测要求 · 待业务确认</dt><dd>{{ brief.monitoring }}</dd></div>{% endif %}
-      </dl>
-    </section>
-    {% endif %}{% endif %}
     <section class="panel" aria-labelledby="delivery-options">
       <h2 id="delivery-options">增值权益与交付</h2>
-      <h3>赠送媒体及增值权益</h3>
-      <p>当前未确认赠送媒体或代理优惠。增值资源待运营方确认可售档期和商务条件后再列入正式订单。</p>
-      <h3 id="publication">上刊准备</h3>
+      <p>报价范围为采购表所列项目。</p>
       <ol class="report-schedule">
         <li><strong>排期确认</strong><p>复核可售余量、预留档期及最终报价。</p></li>
-        <li><strong>上刊前</strong><p>确认素材、内容审批、制作规格与施工窗口。</p></li>
+        <li><strong>上刊准备</strong><p>核准广告内容并核对制作规格与施工窗口。</p></li>
         <li><strong>上刊与监测</strong><p>按核准订单交付上刊记录、监测与异常处理。</p></li>
       </ol>
+      {% include "media-trial-report.html" %}
+      {% include "media-report-review.html" %}
     </section>
 {% endblock %}

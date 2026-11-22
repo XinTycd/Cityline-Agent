@@ -40,7 +40,7 @@ impl Selection {
         match self {
             Self::Bus => "公交车身",
             Self::Metro => "地铁出入口",
-            Self::Both => "公交车身＋地铁出入口",
+            Self::Both => "公交车身、地铁出入口",
         }
     }
 
@@ -140,6 +140,8 @@ pub(super) struct Rate {
 
 #[derive(Clone, Serialize, Deserialize)]
 pub(super) struct Dataset {
+    #[serde(skip)]
+    pub(super) confirmed_core: Option<String>,
     pub(super) stock: Vec<Inventory>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub(super) empty_inventory: BTreeMap<Medium, Source>,
@@ -150,6 +152,14 @@ pub(super) struct Dataset {
     pub(super) supplemental_metro_center: Option<String>,
     #[serde(default)]
     pub(super) evidence: super::visuals::Evidence,
+}
+
+impl Dataset {
+    pub(super) fn core_circle(&self) -> Option<&str> {
+        self.confirmed_core
+            .as_deref()
+            .or_else(|| self.coverage.first().map(|cover| cover.circle.as_str()))
+    }
 }
 
 #[derive(Clone)]
@@ -170,6 +180,20 @@ pub(super) struct Exclusion {
     pub(super) stock: Option<Inventory>,
     pub(super) coverage: Vec<Cover>,
     pub(super) rate: Option<Rate>,
+    pub(super) alternative_quote: Option<Cost>,
+}
+
+impl Exclusion {
+    pub(super) fn unselected(item: Item, why: &'static str) -> Self {
+        Self {
+            name: item.stock.name.clone(),
+            why,
+            stock: Some(item.stock),
+            coverage: item.coverage,
+            rate: Some(item.rate),
+            alternative_quote: Some(item.total),
+        }
+    }
 }
 
 pub(super) struct Proposal {
@@ -253,6 +277,7 @@ pub(super) fn quote_floor(
     }
 }
 
+#[derive(Clone)]
 pub(super) struct RouteCheck {
     pub(super) name: String,
     pub(super) selected: bool,
@@ -459,6 +484,7 @@ fn exclude(excluded: &mut Vec<Exclusion>, name: &str, why: &'static str) {
         stock: None,
         coverage: Vec::new(),
         rate: None,
+        alternative_quote: None,
     });
 }
 
@@ -475,6 +501,7 @@ fn exclude_resource(
         stock: Some(stock.clone()),
         coverage,
         rate: rate.cloned(),
+        alternative_quote: None,
     });
 }
 
@@ -617,7 +644,7 @@ pub(super) fn assemble(
     months: u64,
     required_routes: &[String],
 ) -> Proposal {
-    let primary = data.coverage.first().map(|cover| cover.circle.as_str());
+    let primary = data.core_circle();
     let proximity = |item: &Item| priority.proximity(item, primary);
     let Candidates {
         items: mut candidates,
@@ -787,7 +814,7 @@ pub(super) fn assemble(
         } else {
             "在当前组合中追加将超过预算上限"
         };
-        exclude(&mut excluded, &item.stock.name, why);
+        excluded.push(Exclusion::unselected(item, why));
     }
     let mut bus_items = items
         .iter_mut()

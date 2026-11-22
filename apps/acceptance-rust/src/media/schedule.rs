@@ -17,6 +17,8 @@ use crate::{
     web::{self, WebError},
 };
 
+pub(super) const SHOWCASE_PHASES: &str = "2027-05-01 | 1 | 预热 · 新品试饮\n2027-07-01 | 3 | 主投 · 暑期试饮\n2027-10-01 | 1 | 回访 · 重点门店";
+
 #[derive(Clone, Default, Deserialize, Serialize)]
 pub(crate) struct Rolling {
     pub(super) factors: BTreeMap<String, Factor>,
@@ -24,9 +26,42 @@ pub(crate) struct Rolling {
     pub(super) batches: BTreeMap<String, Uuid>,
     #[serde(default)]
     staged: bool,
+    #[serde(default)]
+    snapshot_span: bool,
+    #[serde(default)]
+    suggest_phases: bool,
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Copy, Deserialize, Eq, PartialEq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum Phase {
+    Warmup,
+    Main,
+    Followup,
+}
+
+impl Phase {
+    fn factor(self) -> Factor {
+        let (weight, reason) = match self {
+            Self::Warmup => (1, "预热 · 提前建立线下曝光"),
+            Self::Main => (3, "主投 · 集中覆盖目标圈"),
+            Self::Followup => (1, "补投 · 补充覆盖并留存复盘依据"),
+        };
+        Factor {
+            weight,
+            reason: reason.into(),
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct PhaseChoice {
+    month: String,
+    phase: Phase,
+}
+
+#[derive(Clone, Deserialize, Eq, PartialEq, Serialize)]
 pub(super) struct Factor {
     weight: u32,
     reason: String,
@@ -41,7 +76,7 @@ impl Default for Factor {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Eq, PartialEq)]
 pub(crate) struct Window {
     pub(crate) starts: String,
     pub(crate) ends: String,
@@ -53,10 +88,87 @@ impl Window {
     pub(crate) fn needs_stock(&self) -> bool {
         self.factor.weight > 0
     }
+
+    pub(super) fn booking_label(&self) -> String {
+        format!(
+            "{} 至 {} · 权重 {}",
+            self.starts, self.ends, self.factor.weight
+        )
+    }
+
+    pub(super) fn planning_context(&self) -> serde_json::Value {
+        let phase = if self.factor.reason.starts_with("预热") {
+            Some(Phase::Warmup)
+        } else if self.factor.reason.starts_with("主投") {
+            Some(Phase::Main)
+        } else if self.factor.reason.starts_with("回访") || self.factor.reason.starts_with("补投")
+        {
+            Some(Phase::Followup)
+        } else {
+            None
+        };
+        serde_json::json!({"starts": self.starts, "ends": self.ends, "days": self.days,
+            "weight": self.factor.weight, "phase": phase})
+    }
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+pub(super) struct ScheduleRevision {
+    pub(super) previous_start: String,
+    pub(super) previous_end: String,
+    pub(super) before: Vec<String>,
+    pub(super) after: Vec<String>,
+    pub(super) reason: String,
+    pub(super) review_operations: bool,
 }
 
 impl Rolling {
+    pub(super) fn for_snapshot(starts: &str, id: Uuid) -> Self {
+        Self {
+            batches: BTreeMap::from([(starts.to_owned(), id)]),
+            snapshot_span: true,
+            ..Self::default()
+        }
+    }
+
     pub(crate) fn showcase(input: &str, starts: &str, ends: &str) -> Result<Self, &'static str> {
+        let mut plan = Self::revised(None, input, starts, ends)?;
+        plan.suggest_phases = input.trim().is_empty();
+        Ok(plan)
+    }
+
+    pub(super) fn candidate_months(&self, starts: &str, ends: &str) -> Vec<String> {
+        if self.suggest_phases {
+            months_between(starts, ends)
+        } else {
+            Vec::new()
+        }
+    }
+
+    pub(super) fn adopt_phases(&mut self, months: &[String], choices: &[PhaseChoice]) -> bool {
+        if months.is_empty()
+            || choices.len() > 3
+            || !choices.iter().any(|choice| choice.phase == Phase::Main)
+            || choices.iter().any(|choice| !months.contains(&choice.month))
+            || !choices
+                .windows(2)
+                .all(|pair| pair[0].month < pair[1].month && pair[0].phase < pair[1].phase)
+        {
+            return false;
+        }
+        self.factors = choices
+            .iter()
+            .map(|choice| (format!("{}-01", choice.month), choice.phase.factor()))
+            .collect();
+        true
+    }
+
+    pub(super) fn revised(
+        previous: Option<&Self>,
+        input: &str,
+        starts: &str,
+        ends: &str,
+    ) -> Result<Self, &'static str> {
         period_months(starts, ends).ok_or("请选择 2027 年内的有效起止日期。")?;
         let first_month = &starts[..7];
         let last_month = &ends[..7];
@@ -87,7 +199,7 @@ impl Rolling {
                         date.into(),
                         Factor {
                             weight,
-                            reason: reason.into(),
+                            reason: super::anonymize_food_case(reason).into_owned(),
                         },
                     )
                     .is_some()
@@ -98,32 +210,32 @@ impl Rolling {
                 return Err("调配月份须在所选档期内。");
             }
         }
-        for (month, weight, description) in [
-            (5, 1, "预热 · 介绍新品和门店试饮信息"),
-            (7, 3, "主投 · 暑期新品试饮到店"),
-            (10, 1, "回访 · 复购提醒与试饮活动复盘"),
-        ] {
-            let date = format!("2027-{month:02}-01");
-            if first_month <= &date[..7] && &date[..7] <= last_month {
-                rolling.factors.insert(
-                    date,
-                    Factor {
-                        weight,
-                        reason: description.into(),
-                    },
-                );
-            }
-        }
-        if rolling.factors.is_empty() {
-            for month in
-                super::date_month(starts).unwrap_or(1)..=super::date_month(ends).unwrap_or(12)
-            {
-                rolling
-                    .factors
-                    .insert(format!("2027-{month:02}-01"), Factor::default());
-            }
+        if let Some(previous) = previous.filter(|plan| plan.staged) {
+            rolling
+                .factors
+                .extend(previous.factors.iter().filter_map(|(month, factor)| {
+                    let key = month.get(..7)?;
+                    (first_month <= key && key <= last_month)
+                        .then(|| (month.clone(), factor.clone()))
+                }));
         }
         rolling.factors.extend(overrides);
+        if rolling.factors.is_empty() {
+            let months = months_between(starts, ends);
+            let main = months.len() / 2;
+            for (index, phase) in [
+                (0, Phase::Warmup),
+                (main, Phase::Main),
+                (months.len() - 1, Phase::Followup),
+            ] {
+                if (phase != Phase::Main) && index == main {
+                    continue;
+                }
+                rolling
+                    .factors
+                    .insert(format!("{}-01", months[index]), phase.factor());
+            }
+        }
         if rolling.factors.values().all(|factor| factor.weight == 0) {
             return Err("请至少安排一个有投放预算的月份。");
         }
@@ -132,6 +244,17 @@ impl Rolling {
 
     pub(crate) fn windows(&self, starts: &str, ends: &str) -> Result<Vec<Window>, &'static str> {
         period_months(starts, ends).ok_or("滚动排期需要有效的 2027 年起止日期。")?;
+        if self.snapshot_span {
+            return Ok(vec![Window {
+                starts: starts.to_owned(),
+                ends: ends.to_owned(),
+                days: days_from_year_start(ends) - days_from_year_start(starts) + 1,
+                factor: Factor {
+                    weight: 1,
+                    reason: "按已导入快照的完整档期核算".into(),
+                },
+            }]);
+        }
         let anchor = if self.staged {
             1
         } else {
@@ -194,6 +317,12 @@ impl Rolling {
     }
 }
 
+fn months_between(starts: &str, ends: &str) -> Vec<String> {
+    (super::date_month(starts).unwrap_or(1)..=super::date_month(ends).unwrap_or(12))
+        .map(|month| format!("2027-{month:02}"))
+        .collect()
+}
+
 fn days_from_year_start(day: &str) -> u32 {
     let month = day[5..7].parse::<u32>().unwrap_or(1);
     (1..month).map(days_in).sum::<u32>() + day[8..].parse::<u32>().unwrap_or(1)
@@ -221,6 +350,7 @@ struct Segment {
 
 struct Placement<'a> {
     segment: &'a Segment,
+    planned: u64,
     limit: u64,
     proposal: Option<Proposal>,
 }
@@ -244,6 +374,14 @@ pub(super) struct Plan<'a> {
     placements: Vec<Placement<'a>>,
     pub(super) total: Cost,
     pub(super) complete: bool,
+}
+
+impl Plan<'_> {
+    fn has_flexible_windows(&self) -> bool {
+        self.placements
+            .iter()
+            .any(|row| row.segment.window.factor.weight == 0)
+    }
 }
 
 struct BudgetComparison {
@@ -309,6 +447,61 @@ impl BudgetComparison {
 }
 
 impl Calendar {
+    pub(super) fn planning_context(&self) -> Vec<serde_json::Value> {
+        self.segments
+            .iter()
+            .filter(|segment| segment.window.needs_stock())
+            .map(|segment| {
+                let mut period = segment.window.planning_context();
+                period["inventory_observed"] = serde_json::json!(segment.snapshot.is_some());
+                if let Some(snapshot) = &segment.snapshot {
+                    period["source"] = serde_json::json!(if snapshot.data.demo {
+                        "synthetic_sample"
+                    } else if snapshot.source == super::source_label("platform") {
+                        "verified_platform"
+                    } else {
+                        "local_snapshot"
+                    });
+                    period["bus_in_stock"] = serde_json::json!(
+                        snapshot
+                            .data
+                            .stock
+                            .iter()
+                            .any(|row| row.medium == BUS && row.free > 0)
+                    );
+                    period["metro_in_stock"] = serde_json::json!(
+                        snapshot
+                            .data
+                            .stock
+                            .iter()
+                            .any(|row| row.medium == METRO && row.free > 0)
+                    );
+                    period["has_tariff"] = serde_json::json!(!snapshot.data.rates.is_empty());
+                }
+                period
+            })
+            .collect()
+    }
+    pub(super) fn platform_inputs(&self) -> bool {
+        self.segments
+            .iter()
+            .filter(|segment| segment.window.needs_stock())
+            .all(|segment| {
+                segment
+                    .snapshot
+                    .as_ref()
+                    .is_some_and(|snapshot| snapshot.source == super::source_label("platform"))
+            })
+    }
+
+    pub(super) fn purchase_snapshots(&self) -> Option<Vec<&Snapshot>> {
+        self.segments
+            .iter()
+            .filter(|segment| segment.window.needs_stock())
+            .map(|segment| segment.snapshot.as_ref())
+            .collect()
+    }
+
     pub(super) async fn load(
         store: &crate::store::Store,
         options: &Options,
@@ -329,7 +522,16 @@ impl Calendar {
                     .then_some(options.batch)
                     .flatten()
             });
-            let snapshot = if !window.needs_stock()
+            let snapshot = if window.needs_stock() && options.demo == Some(1) {
+                let mut snapshot = super::synthetic(options.industry);
+                snapshot.starts.clone_from(&window.starts);
+                snapshot.ends.clone_from(&window.ends);
+                let month = super::date_month(&window.starts).expect("validated schedule month");
+                for observation in &mut snapshot.data.evidence.reach {
+                    observation.month = month;
+                }
+                Some(snapshot)
+            } else if !window.needs_stock()
                 || ((options.source.platform() || options.lock_snapshot) && query.batch.is_none())
             {
                 None
@@ -392,12 +594,37 @@ impl Calendar {
             .zip(&nominal)
             .map(|(bound, reserve)| bound.unwrap_or((*reserve, *reserve)))
             .collect();
-        let mut result: Vec<_> = bounds.iter().map(|(minimum, _)| *minimum).collect();
-        let reserved: u64 = result.iter().sum();
-        if reserved > amount {
-            return if soft { result } else { nominal };
+        let total_minimum = bounds.iter().map(|(minimum, _)| minimum).sum::<u64>();
+        if total_minimum > amount {
+            return if soft {
+                bounds.iter().map(|(minimum, _)| *minimum).collect()
+            } else {
+                nominal
+            };
         }
-        let mut remaining = amount - reserved;
+        let mut result = nominal
+            .iter()
+            .zip(&bounds)
+            .map(|(&target, &(minimum, ceiling))| target.clamp(minimum, ceiling))
+            .collect::<Vec<_>>();
+        let allocated = result.iter().sum::<u64>();
+        if allocated > amount {
+            let mut excess = allocated - amount;
+            let mut slack = allocated - total_minimum;
+            for (value, (minimum, _)) in result.iter_mut().zip(&bounds) {
+                let adjustable = *value - minimum;
+                if excess == 0 || adjustable == 0 {
+                    continue;
+                }
+                let reduction =
+                    (u128::from(excess) * u128::from(adjustable) / u128::from(slack)) as u64;
+                *value -= reduction;
+                excess -= reduction;
+                slack -= adjustable;
+            }
+            return result;
+        }
+        let mut remaining = amount - allocated;
         while remaining > 0 {
             let eligible_weight: u64 = self
                 .weights()
@@ -437,10 +664,12 @@ impl Calendar {
                     Request {
                         data: &snapshot.data,
                         target: 0,
+                        target_band: None,
                         hard_cap: None,
                         media,
                         priority: policy.emphasis,
                         emphasis: policy.emphasis,
+                        confirmed_focus: policy.confirmed_focus,
                         months: 1,
                         routes: &options.required_routes,
                     }
@@ -461,10 +690,12 @@ impl Calendar {
                         Request {
                             data: &snapshot.data,
                             target,
+                            target_band: super::allocation_budget_band(budget, target),
                             hard_cap: caps.as_ref().map(|quotas| quotas[index]),
                             media,
                             priority: strategy.priority(),
                             emphasis: policy.emphasis,
+                            confirmed_focus: policy.confirmed_focus,
                             months: 1,
                             routes: &options.required_routes,
                         },
@@ -499,6 +730,7 @@ impl Calendar {
                     allocated.map_or((target, None), |(limit, proposal)| (limit, Some(proposal)));
                 Placement {
                     segment,
+                    planned: target,
                     limit,
                     proposal,
                 }
@@ -577,6 +809,28 @@ impl Calendar {
         variants
     }
 
+    pub(super) fn selected_inventory(
+        &self,
+        options: &Options,
+        budget: u32,
+        portfolio: &Portfolio,
+        strategy: Strategy,
+    ) -> Option<Vec<crate::refresh::InventoryCheck>> {
+        self.plan(options, budget, portfolio, strategy)
+            .placements
+            .into_iter()
+            .filter(|placement| placement.segment.window.needs_stock())
+            .map(|placement| {
+                let window = &placement.segment.window;
+                super::selected_inventory(
+                    &window.starts,
+                    &window.ends,
+                    placement.proposal.as_ref()?,
+                )
+            })
+            .collect()
+    }
+
     pub(super) fn render(
         &self,
         options: &Options,
@@ -585,7 +839,7 @@ impl Calendar {
         prior: Option<&Portfolio>,
         brand: &Brand,
         guidance: &[(&str, &str)],
-    ) -> Result<(String, bool), WebError> {
+    ) -> Result<String, WebError> {
         let budget = options.budget.unwrap_or(super::SHOWCASE_BUDGET);
         let previous_budget = options
             .compare
@@ -622,7 +876,6 @@ impl Calendar {
             variants,
         }
         .render()
-        .map(|html| (html, full_evidence))
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "无法渲染滚动排期报告。"))
     }
 }
@@ -646,13 +899,18 @@ struct CalendarReport<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Calendar, Rolling, Segment};
+    use super::{Calendar, Phase, PhaseChoice, Rolling, Segment};
 
     #[test]
     fn date_picker_range_keeps_partial_month_boundaries() {
         let starts = "2027-06-20";
         let ends = "2027-07-08";
-        let rolling = Rolling::showcase("2027-06-01 | 1 | 门店试饮预热", starts, ends).unwrap();
+        let rolling = Rolling::showcase(
+            "2027-06-01 | 1 | 门店试饮预热\n2027-07-01 | 3 | 主投",
+            starts,
+            ends,
+        )
+        .unwrap();
         let periods = rolling.windows(starts, ends).unwrap();
         let ranges: Vec<_> = periods
             .iter()
@@ -672,6 +930,40 @@ mod tests {
                 ("2027-07-01", "2027-07-08", 8, 3),
             ]
         );
+    }
+
+    #[test]
+    fn explicit_windows_are_preserved_and_automatic_choices_must_stay_in_bounds() {
+        let (starts, ends) = ("2027-01-01", "2027-12-31");
+        let mut fixed = Rolling::showcase("2027-09-01 | 3 | 客户确认活动", starts, ends).unwrap();
+        let choice = |month: &str, phase| PhaseChoice {
+            month: month.into(),
+            phase,
+        };
+        let paid = |rolling: &Rolling| {
+            rolling
+                .windows(starts, ends)
+                .unwrap()
+                .into_iter()
+                .filter(|window| window.needs_stock())
+                .map(|window| window.starts)
+                .collect::<Vec<_>>()
+        };
+        assert!(fixed.candidate_months(starts, ends).is_empty());
+        assert!(!fixed.adopt_phases(&[], &[choice("2027-08", Phase::Main)]));
+        assert_eq!(paid(&fixed), ["2027-09-01"]);
+        let mut auto = Rolling::showcase("", starts, ends).unwrap();
+        let months = auto.candidate_months(starts, ends);
+        assert!(!auto.adopt_phases(&months, &[choice("2028-08", Phase::Main)]));
+        assert!(!auto.adopt_phases(
+            &months,
+            &[
+                choice("2027-08", Phase::Main),
+                choice("2027-08", Phase::Followup)
+            ]
+        ));
+        assert!(auto.adopt_phases(&months, &[choice("2027-08", Phase::Main)]));
+        assert_eq!(paid(&auto), ["2027-08-01"]);
     }
 
     #[test]
@@ -712,5 +1004,36 @@ mod tests {
         let nominal = calendar.targets(100).collect::<Vec<_>>();
         let partial = calendar.distribute(100, &[bounds[0], None, bounds[2]], true);
         assert_eq!(partial[1], nominal[1]);
+    }
+
+    #[test]
+    fn explicit_phase_weights_keep_original_budget_when_feasible() {
+        let (starts, ends) = ("2027-01-01", "2027-12-31");
+        let rolling = Rolling::showcase(
+            "2027-05-01 | 1 | 预热\n2027-07-01 | 3 | 主投\n2027-10-01 | 1 | 回访",
+            starts,
+            ends,
+        )
+        .unwrap();
+        let segments = rolling
+            .windows(starts, ends)
+            .unwrap()
+            .into_iter()
+            .filter(|window| window.needs_stock())
+            .map(|window| Segment {
+                window,
+                snapshot: None,
+            })
+            .collect();
+        let calendar = Calendar { segments };
+        let bounds = [
+            Some((320_000, 700_000)),
+            Some((310_000, 1_500_000)),
+            Some((330_000, 650_000)),
+        ];
+        assert_eq!(
+            calendar.distribute(2_000_000, &bounds, true),
+            [400_000, 1_200_000, 400_000]
+        );
     }
 }

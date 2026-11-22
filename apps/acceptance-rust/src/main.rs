@@ -21,7 +21,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| ".operations-data/cityline.sqlite".into());
     let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port)).await?;
-    let model = model::Model::from_environment()?;
+    let model = model::Model::from_environment();
     let store = store::Store::initialize(path)?;
     let agents = agents::Agents::initialize(store.clone(), model)?;
     let addr = listener.local_addr()?;

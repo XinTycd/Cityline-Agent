@@ -1,0 +1,12 @@
+{% if let Some(trial) = campaign.brief.trial_measurement %}
+<p><strong>KPI 与统计口径</strong> · 到店试饮有效扫码量。投放后按匿名事件去重，剔除测试扫码。</p>
+<p>门店范围 · {{ trial.stores }}</p>
+<p>统计窗口 · {{ trial.window }}</p>
+<p>对照基线 · {{ trial.baseline }}</p>
+{% else if campaign.demo && campaign.brief.monitoring.is_empty() %}
+<p><strong>KPI 与统计口径</strong> · 分阶段、分商圈统计有效到店试饮扫码量，按匿名事件编号去重。</p>
+{% else if campaign.brief.monitoring.is_empty() %}
+<p>客户验收口径待确认。</p>
+{% endif %}
+{% if !campaign.brief.monitoring.is_empty() %}<p><strong>{% if campaign.brief.trial_measurement.is_some() %}客户补充口径{% else %}KPI 与统计口径{% endif %}</strong> · {{ campaign.brief.monitoring }}</p>{% endif %}
+<p><strong>投放证明</strong> · 按采购清单留存线路或出口编号、实际档期及带日期的上下刊照片；结案按资源逐项核对，附异常与补刊记录。</p>

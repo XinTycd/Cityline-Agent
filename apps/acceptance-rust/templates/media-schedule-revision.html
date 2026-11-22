@@ -1,0 +1,29 @@
+{% extends "shell.html" %}
+{% block content %}
+<div class="page-heading">
+  <div><h1>{{ heading }}</h1><p>{{ task.summary() }}</p></div>
+  <a class="button secondary" href="/media-proposals/tasks/{{ task.id }}">返回任务详情</a>
+</div>
+<section class="panel settings-panel" aria-labelledby="schedule-edit-title">
+  <h2 id="schedule-edit-title">原采购档期</h2>
+  <ul>{% for period in paid %}<li>{{ period }}</li>{% endfor %}</ul>
+  <p>新版本沿用客户需求、预算、目标圈和必选线路。采购段变化时，运营需确认新施工窗口。</p>
+  <form class="settings-form" method="post" action="/media-proposals/tasks/{{ task.id }}/schedule" data-workspace-submit>
+    <div class="media-fields">
+      <label>新档期开始<input type="date" name="starts" min="2027-01-01" max="2027-12-31" value="{{ starts }}" required></label>
+      <label>新档期结束<input type="date" name="ends" min="2027-01-01" max="2027-12-31" value="{{ ends }}" required></label>
+    </div>
+    <label>月度调配（选填）<textarea name="factors" rows="3" maxlength="600" placeholder="2027-07-01 | 0 | 原主投月转为机动&#10;2027-08-01 | 3 | 客户将活动移到八月"></textarea></label>
+    <p>按「月初日期｜权重 0–3｜原因」填写。新档期内的原权重自动沿用，填写的月份按新权重执行。0 代表该月机动。</p>
+    {% if let Some(window) = trial_window %}
+    <label>试饮扫码统计窗口<input name="trial_window" value="{{ window }}" maxlength="100" required></label>
+    {% endif %}
+    <label>脱敏调整依据<input name="reason" maxlength="150" required></label>
+    <label class="media-confirm"><input name="confirmed" type="checkbox" value="1" required>已核对新档期、调配安排{% if trial_window.is_some() %}和扫码统计窗口{% endif %}</label>
+    <div class="form-actions action-group">
+      <button type="submit">按新档期获取数据并生成</button>
+      <button class="secondary" type="submit" name="local_snapshot" value="1">用同档期快照生成</button>
+    </div>
+  </form>
+</section>
+{% endblock %}

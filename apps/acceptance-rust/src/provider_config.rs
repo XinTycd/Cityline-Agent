@@ -18,14 +18,21 @@ pub(crate) fn origin(name: &str) -> Option<Url> {
 
 pub(crate) fn login_url(origin_name: &str, path_name: &str) -> Option<Url> {
     let origin = origin(origin_name)?;
-    let path = std::env::var(path_name).ok()?;
+    let path = path(path_name)?;
+    let url = origin.join(&path).ok()?;
+    (url.origin() == origin.origin()).then_some(url)
+}
+
+pub(crate) fn path(name: &str) -> Option<String> {
+    let path = std::env::var(name).ok()?;
     if !path.starts_with('/')
         || path.starts_with("//")
-        || path.contains(['\\', '?', '#'])
-        || path.chars().any(char::is_control)
+        || !path
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"/_.-".contains(&byte))
+        || path.split('/').any(|segment| matches!(segment, "." | ".."))
     {
         return None;
     }
-    let url = origin.join(&path).ok()?;
-    (url.origin() == origin.origin()).then_some(url)
+    Some(path)
 }

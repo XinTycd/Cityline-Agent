@@ -61,7 +61,7 @@
     {% endif %}
   </details>
   {% endfor %}
-  {% if !view.proposal.excluded.is_empty() %}
+  {% if show_excluded && !view.proposal.excluded.is_empty() %}
   <details class="media-item">
     <summary>查看待核或未入选项（{{ view.proposal.excluded.len() }}）</summary>
     <ul>{% for item in view.proposal.excluded.iter().take(80) %}<li>{{ item.name }} · {{ item.why }}

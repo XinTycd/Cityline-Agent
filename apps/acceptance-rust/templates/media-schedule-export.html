@@ -2,35 +2,55 @@
 {% block title %}{{ options.industry.brand() }} · 滚动投放排期 · {{ brand.name }}{% endblock %}
 {% block report_nav %}
 <nav aria-label="报告目录">
-  <a href="#summary">方案总览</a>
-  <a href="#campaign">需求假设</a>
+  <a href="#summary">总览</a>
+  <a href="#campaign">客户与目标</a>
   <a href="#proposal-variants">方案 A／B</a>
-  {% if previous_budget.is_some() %}<a href="#budget-comparison">预算变化</a>{% endif %}
-  <a href="#calendar">档期与媒介</a>
-  <a href="#conditions">报价与验收</a>
+  <a href="#calendar">排期</a>
+  <a href="#conditions">核验与交付</a>
 </nav>
 {% endblock %}
 {% block report_content %}
     <section class="panel report-cover" aria-labelledby="summary">
       <div class="report-cover-head">
-        <h1 id="summary">食品饮料行业 · 阶段投放提案</h1>
-        <p>上海新云传媒 · {% if campaign.brief.objective.is_empty() %}{{ options.industry.campaign() }}{% else %}{{ campaign.brief.objective }}{% endif %}</p>
+        <h1 id="summary">上海户外媒体投放提案</h1>
+        <p>上海新云传媒{% if !campaign.brief.objective.is_empty() %} · {{ campaign.brief.objective }}{% else if !campaign.brief.campaign_goal.is_empty() %} · 投放主目标 {{ campaign.brief.campaign_goal }}{% else if campaign.demo %} · {{ options.industry.campaign() }}{% endif %}</p>
+        <!-- cityline-report-generated -->
       </div>
-      {% if !plan.complete || !full_evidence || operations_incomplete %}<p class="media-notice report-draft"><strong>备选草案 · 待确认</strong> 请检查两案标注待核的档期、资源、曝光或施工条件。</p>{% endif %}
-      <dl class="media-stats report-overview">
-        <div><dt>项目档期</dt><dd>{{ plan.placements[0].segment.window.starts }} 至 {{ plan.placements[plan.placements.len() - 1].segment.window.ends }}</dd></div>
-        <div><dt>整案预算量级</dt><dd>约 {{ budget }} 万元</dd></div>
-        {% if let Some(cap) = options.hard_cap %}<div><dt>客户预算硬上限</dt><dd>{{ crate::media::wan(cap) }} 万元</dd></div>{% endif %}
-        <div><dt>已排资源刊例估算</dt><dd>{{ crate::media::wan(plan.total.low) }}–{{ crate::media::wan(plan.total.high) }} 万元</dd></div>
+      {% if options.demo == Some(1) %}
+      <p class="media-notice report-draft" data-demo-report><strong>合成样例 · 仅供演示</strong>。库存、报价和效果数据用于展示工作台流程。</p>
+      {% else if !plan.complete || !full_evidence || operations_incomplete || options.goal_needs_confirmation() %}
+      <p class="media-notice report-draft"><strong>投放条件说明</strong>。各档期的库存、报价与投放证据列于方案明细。</p>
+      {% endif %}
+      <h2 class="report-overview-title">报告数据一览</h2>
+      <dl class="media-stats report-overview metric-strip">
+        <div class="metric-tile"><dt>投放档期</dt><dd>{{ plan.placements[0].segment.window.starts }} 至 {{ plan.placements[plan.placements.len() - 1].segment.window.ends }}</dd></div>
+        <div class="metric-tile"><dt>整案预算量级</dt><dd>约 {{ budget }} 万元</dd><dd><small>报价参考 {{ crate::media::budget_band_label(budget) }}</small></dd></div>
+        <div class="metric-tile"><dt>媒体范围</dt><dd>{{ campaign.media.label() }}</dd></div>
+        {% if let Some(cap) = options.hard_cap %}<div class="metric-tile"><dt>客户预算硬上限</dt><dd>{{ crate::media::wan(cap) }} 万元</dd></div>{% endif %}
       </dl>
-      <p>按段公布公交车辆数和地铁点位数。同一资源可在多个投放段出现。</p>
+      <p class="report-caption"><a href="#calendar">查阅档期库存与报价</a></p>
+      {% include "media-report-overview.html" %}
+      {% include "media-report-recommendation.html" %}
     </section>
-    <section class="panel" aria-labelledby="campaign">
-      <h2 id="campaign">Campaign 假设书</h2>
-      {% include "media-campaign-fields.html" %}
-      <p class="report-caption">选点与采购依据见 <a href="#proposal-variants">A／B 清单与线路图</a>，按段查阅<a href="#calendar">档期库存</a>和<a href="#conditions">交付验收条件</a>。</p>
+    <section class="panel" id="campaign" aria-labelledby="brief-heading">
+      <h2 id="brief-heading">品牌与投放目标</h2>
+      {% let media_section = "#proposal-variants" %}
+      <dl class="report-guidance" aria-label="品牌与目标">{% include "media-client-fields.html" %}</dl>
+      <p><a href="#measurement">查看监测与验收约定</a></p>
     </section>
     {% include "media-variants.html" %}
+    {% if let Some(revision) = options.schedule_revision %}
+    <section class="panel" aria-labelledby="changed-schedule">
+      <h2 id="changed-schedule">档期变更</h2>
+      <p>{{ revision.previous_start }} 至 {{ revision.previous_end }} → {{ campaign.starts }} 至 {{ campaign.ends }}。</p>
+      <p>调整依据 · {{ revision.reason }}</p>
+      <dl class="report-guidance">
+        <div><dt>原采购段</dt><dd><ul>{% for period in revision.before %}<li>{{ period }}</li>{% endfor %}</ul></dd></div>
+        <div><dt>新采购段</dt><dd><ul>{% for period in revision.after %}<li>{{ period }}</li>{% endfor %}</ul></dd></div>
+      </dl>
+      {% if revision.review_operations && options.operations.is_none() %}<p>采购段已调整。新的上下刊施工窗口待运营确认。</p>{% endif %}
+    </section>
+    {% endif %}
     {% if let Some(previous_budget) = previous_budget %}
     <section class="panel" aria-labelledby="budget-comparison">
       <h2 id="budget-comparison">预算变化 · {{ previous_budget }} 万元 → {{ budget }} 万元</h2>
@@ -63,47 +83,45 @@
       {% endfor %}
     </section>
     {% endif %}
-    <details class="panel report-supporting-data" id="calendar">
-      <summary>客户当前预算的档期与媒介</summary>
+    <section class="panel" aria-labelledby="calendar">
+      <h2 id="calendar">档期与媒介</h2>
+      <ol class="report-schedule">
       {% for row in plan.placements %}
       {% let window = row.segment.window %}
-      <details class="media-item" open>
-        <summary><strong>{{ window.starts }} 至 {{ window.ends }}</strong> · {{ window.days }} 天 · {% if window.factor.weight == 0 %}机动 · 无采买{% else if row.ready() %}条件已核{% else %}待核对{% endif %}</summary>
-        <p>调配依据 · {{ window.factor.reason }} · 权重 {{ window.factor.weight }} · 本段预算 {{ crate::media::wan(row.limit) }} 万元。</p>
-        {% if let Some(snapshot) = row.segment.snapshot %}
-        <p>快照来源 · {{ snapshot.source }} · 库存核对 {{ snapshot.observed }}（北京时间）</p>
-        {% else if window.factor.weight > 0 %}<p>此段缺少按实际起止日查询的红豆快照，预算已预留，待补证据后安排资源。</p>{% endif %}
+      {% if window.factor.weight > 0 %}
+      <li><strong>{{ window.starts }} 至 {{ window.ends }}</strong>
+        <p>{{ window.days }} 天 · {% if row.ready() %}条件已核{% else %}待核对{% endif %}</p>
+        <p>{{ window.factor.reason }} · 调配权重 {{ window.factor.weight }}</p>
+        <p>计划预算 {{ crate::media::wan(row.planned) }} 万元</p>
+        {% if row.segment.snapshot.is_none() %}<small>缺少匹配库存，预算已预留。</small>{% endif %}
         {% if let Some(proposal) = row.proposal %}
-          <p><strong>公交 {{ proposal.quantity(crate::media::BUS) }} 辆 · 地铁 {{ proposal.quantity(crate::media::METRO) }} 处</strong> · 已排资源 ¥{{ proposal.total.low }}–{{ proposal.total.high }}</p>
-          {% if !proposal.complete_media %}<p>本段预算与当期库存无法覆盖所选媒体组合。</p>{% endif %}
-          {% if !proposal.required_routes.is_empty() %}
+        {% if !proposal.required_routes.is_empty() %}
+        <details class="report-evidence">
+          <summary>客户指定线路</summary>
           <ul>{% for item in proposal.required_routes %}<li>{{ item.name }} · {{ item.reason }}</li>{% endfor %}</ul>
-          {% endif %}
-          <div class="task-rail" role="region" tabindex="0" aria-label="本段采购清单">
-            <table class="work-table report-table report-schedule-table">
-              <thead><tr><th scope="col">线路或点位</th><th scope="col">数量</th><th scope="col">目标圈</th><th scope="col">红豆档期原表</th><th scope="col">刊例依据</th><th scope="col">本项估算</th></tr></thead>
-              <tbody>{% for item in proposal.items %}<tr>
-                <th scope="row">{{ item.stock.name }}<small>{{ item.stock.medium.label() }} · {{ item.stock.grade }}{% if item.client_required %} · 客户必选{% endif %}</small></th>
-                <td>{{ item.quantity }}</td><td>{% for cover in item.coverage %}{{ cover.circle }}（{{ cover.source.file }} 第 {{ cover.source.row }} 行）<br>{% else %}覆盖待核{% endfor %}</td>
-                <td>{{ item.stock.source.file }} 第 {{ item.stock.source.row }} 行 · 可售 {{ item.stock.free }}</td>
-                <td>{{ item.rate.source.file }} 第 {{ item.rate.source.row }} 行</td><td>¥{{ item.total.low }}–{{ item.total.high }}</td>
-              </tr>{% endfor %}</tbody>
-            </table>
-          </div>
+        </details>
         {% endif %}
-      </details>
+        {% endif %}
+      </li>
+      {% endif %}
       {% endfor %}
-    </details>
+      </ol>
+      {% if plan.has_flexible_windows() %}
+      <details class="report-evidence">
+        <summary>其他档期 · 机动 · 无采买</summary>
+        <ul>{% for row in plan.placements %}{% if row.segment.window.factor.weight == 0 %}<li>{{ row.segment.window.starts }} 至 {{ row.segment.window.ends }}</li>{% endif %}{% endfor %}</ul>
+      </details>
+      {% endif %}
+      <a href="#proposal-variants">查看各案逐档期采购清单与报价</a>
+    </section>
     <section class="panel" aria-labelledby="conditions">
       <h2 id="conditions">报价与变更条件</h2>
-      <p>每段按一档月度刊例估算，并计入该段制作费。跨月、末段不足一期、连续续刊免制作费及折扣均待商务确认。</p>
-      <p>调配依据由操作员确认。预算先保留满足各段必要组合的金额，再按天数和权重分配余量，并受每段库存约束。</p>
-      <p>上刊前另核实夜间施工窗口、单夜产能和天气。雨天触发顺延，按合同确认缓冲及误一补二条款。首批上刊、各段结束及异常补刊留存影像，结案时核对实投档期、清单、曝光口径和分阶段试饮扫码记录。</p>
+      <p>每段按一档月度刊例估算，并计入该段制作费。跨月、末段不足一期、连续续刊免制作费及折扣按签订的订单执行。</p>
+      <p><strong>上刊准备</strong> 核实夜间施工窗口、单夜产能和天气。雨天停工并更新排期，超出缓冲时交运营复核。确认适用合同的误一补二条款及补刊窗口后再对外承诺。</p>
+      {% include "media-trial-report.html" %}
       {% if let Some(rules) = options.operations %}
       <p>施工核对依据 · {{ rules.source }}。{{ rules.hours }}（北京时间），公交每晚 {{ rules.buses_per_night }} 辆，地铁每晚 {{ rules.exits_per_night }} 处，{% if rules.parallel %}两个班组可并行{% else %}同一班组分开作业{% endif %}，各窗口预留 {{ rules.buffer }} 晚天气缓冲。上下刊测算见两案的采购与触达明细。</p>
       {% else if options.operations_required %}<p>夜间窗口、产能与天气缓冲待运营确认。确认后按各案采购清单逐段核对。</p>{% endif %}
-      {% if !guidance.is_empty() %}
-      <dl class="report-guidance">{% for (label, text) in guidance %}<div><dt>{{ label }}</dt><dd>{{ text }}</dd></div>{% endfor %}</dl>
-      {% endif %}
+      {% include "media-report-review.html" %}
     </section>
 {% endblock %}

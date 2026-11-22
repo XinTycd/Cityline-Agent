@@ -1,0 +1,44 @@
+/* Adapted from Paid Media Agent's report.html.j2 (LangChain AI, Apache-2.0).
+   Upstream revision d4ee460b729ae6a9a7c0fb0e84e7ab07756fd5ee.
+   Scoped to the exported report and adapted for Chinese copy and flexible KPIs. */
+.report-page { -webkit-font-smoothing: antialiased; }
+.report-page .report-cover-head { padding-bottom: 22px; border-bottom: 1px solid var(--line); }
+.report-page .report-cover h1 { margin-block: 10px; line-height: 1.12; letter-spacing: -.03em; text-wrap: balance; }
+.report-page .report-section-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+  padding-bottom: 10px;
+  border-bottom: 1.5px solid var(--text);
+}
+.report-page .metric-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  border: 1px solid var(--line);
+  border-radius: var(--report-radius);
+  overflow: hidden;
+}
+.report-page .metric-strip .metric-tile {
+  min-width: 0;
+  padding: clamp(12px, 2vw, 22px) clamp(14px, 2vw, 24px);
+  background: var(--panel);
+}
+.report-page .metric-value {
+  margin: 8px 0;
+  font-size: 30px;
+  font-weight: 500;
+  line-height: 1.15;
+  letter-spacing: -.025em;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.report-page .metric-unit { font-size: .55em; letter-spacing: 0; color: var(--muted); }
+@page { size: A4; margin: 16mm; }
+@media print {
+  .report-page .report-cover-head { padding-bottom: 14pt; }
+  .report-page .metric-strip { break-inside: avoid; }
+  .report-page .metric-strip .metric-tile { padding: 9pt; }
+  .report-page .metric-value { font-size: 18pt; }
+  .report-page :is(h1, h2, h3, .report-section-head) { break-after: avoid; }
+}

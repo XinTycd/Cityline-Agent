@@ -1,0 +1,40 @@
+<div class="overview-queues" data-overview-queues{% if active_count > 0 %} data-running{% endif %}>
+  <dl class="media-stats overview-stats">
+    <div><dt>任务总数</dt><dd data-overview-count="total">{{ total }}</dd></div>
+    <div><dt>进行中</dt><dd data-overview-count="active">{{ active_count }}</dd></div>
+    <div><dt>待人工确认</dt><dd data-overview-count="ready">{{ ready_count }}</dd></div>
+    <div><dt>已确认</dt><dd data-overview-count="approved">{{ approved_count }}</dd></div>
+    <div><dt>待核与异常</dt><dd data-overview-count="exceptions">{{ exception_count }}</dd></div>
+    <div><dt>数据快照</dt><dd data-overview-count="snapshots">{{ snapshot_count }}</dd></div>
+  </dl>
+  <section class="panel list-panel" aria-labelledby="active-tasks">
+    <div class="result-header section-toolbar"><h2 id="active-tasks">进行中</h2><a href="/task-log?filter=active" aria-label="查看全部进行中任务">查看全部</a></div>
+    {% if active.is_empty() %}
+    <p class="list-empty">当前没有运行中的任务。</p>
+    {% else %}
+    {% let tasks = active %}
+    {% let task_table_label = "进行中的任务列表" %}
+    {% include "task-table.html" %}
+    {% endif %}
+  </section>
+  <section class="panel list-panel" aria-labelledby="ready-tasks">
+    <div class="result-header section-toolbar"><h2 id="ready-tasks">已完成待人工确认</h2><a href="/task-log?filter=pending" aria-label="查看全部待确认任务">查看全部</a></div>
+    {% if ready.is_empty() %}
+    <p class="list-empty">当前没有待确认的提案。</p>
+    {% else %}
+    {% let tasks = ready %}
+    {% let task_table_label = "待人工确认的任务列表" %}
+    {% include "task-table.html" %}
+    {% endif %}
+  </section>
+  <section class="panel list-panel" aria-labelledby="exception-tasks">
+    <div class="result-header section-toolbar"><h2 id="exception-tasks">待核与异常</h2><a href="/task-log?filter=exceptions" aria-label="查看全部待核与异常任务">查看全部</a></div>
+    {% if exceptions.is_empty() %}
+    <p class="list-empty">当前没有待核或异常任务。</p>
+    {% else %}
+    {% let tasks = exceptions %}
+    {% let task_table_label = "待核与异常任务列表" %}
+    {% include "task-table.html" %}
+    {% endif %}
+  </section>
+</div>

@@ -1,6 +1,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Mutex,
+    time::Duration,
 };
 
 use axum::{
@@ -10,7 +11,7 @@ use axum::{
     routing::get,
 };
 use rusqlite::{OptionalExtension, params};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{audit, refresh::BrowserImport, store::Store, web::WebError};
@@ -26,9 +27,53 @@ use super::{
 
 const FORBIDDEN: WebError = (
     StatusCode::FORBIDDEN,
-    "本接口仅供当前数据平台取数进程使用。",
+    "本接口仅供当前从平台获取数据的进程使用。",
 );
-const MISSING: WebError = (StatusCode::CONFLICT, "本次取数尚未提交完整档期数据。");
+const MISSING: WebError = (StatusCode::CONFLICT, "本次获取数据尚未提交完整档期数据。");
+const POLICY_UNAVAILABLE: WebError = (
+    StatusCode::SERVICE_UNAVAILABLE,
+    "核算策略未能在取证时限内就绪。",
+);
+
+#[derive(Clone, Deserialize, Serialize)]
+pub(crate) struct ReachCheck {
+    pub(super) starts: String,
+    pub(super) media: Medium,
+    pub(super) resource: String,
+    pub(super) month: u32,
+    pub(super) exact: ReachFailure,
+    pub(super) baseline: Option<ReachFailure>,
+}
+
+#[derive(Clone, Copy, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub(super) enum ReachFailure {
+    MonthNotConfigured,
+    ResourceNotConfirmed,
+    StationOnly,
+    UnitNotConfirmed,
+    NoObservation,
+    AuthorizationRejected,
+    LabelQueryError,
+    PlatformError,
+    PausedAfterProviderErrors,
+}
+
+impl ReachFailure {
+    pub(super) fn label(self) -> &'static str {
+        match self {
+            Self::MonthNotConfigured => "未配置查询该统计月",
+            Self::ResourceNotConfirmed => "无法匹配唯一的新云资源标签",
+            Self::StationOnly => "仅取得站级历史人流",
+            Self::UnitNotConfirmed => "有历史人流，缺少对应的单位日触达口径",
+            Self::NoObservation => "未返回可用的该月统计",
+            Self::AuthorizationRejected => "新云拒绝查询授权，请重新认证",
+            Self::LabelQueryError => "新云媒体标签读取失败，请重试",
+            Self::PlatformError => "新云统计查询失败，请重试",
+            Self::PausedAfterProviderErrors => "新云连续查询失败后暂停",
+        }
+    }
+}
 
 pub(crate) struct EvidenceRefresh {
     pins: BTreeMap<String, Uuid>,
@@ -58,6 +103,9 @@ impl EvidenceRefresh {
         })
         .await?
         .ok_or(MISSING)?;
+        additions
+            .check_exit_points(&pinned.stock, &pinned.coverage)
+            .map_err(|reason| (StatusCode::UNPROCESSABLE_ENTITY, reason))?;
         let mut staging = self.staged.lock().expect("evidence staging lock");
         staging
             .as_mut()
@@ -145,11 +193,31 @@ fn encode_error(error: serde_json::Error) -> rusqlite::Error {
 }
 
 #[derive(Clone, Serialize)]
+pub(crate) struct EvidenceManifest {
+    periods: Vec<EvidencePlan>,
+    overview_routes: Vec<Vec<String>>,
+}
+
+impl EvidenceManifest {
+    pub(super) fn accepts_overview(&self, map: &super::visuals::OfficialMap) -> bool {
+        let routes = map.route_keys();
+        self.overview_routes
+            .iter()
+            .any(|set| route_keys(set) == routes)
+    }
+}
+
+fn route_keys(routes: &[String]) -> BTreeSet<String> {
+    routes.iter().map(|route| bus_route_key(route)).collect()
+}
+
+#[derive(Clone, Serialize)]
 pub(crate) struct EvidencePlan {
     batch: Uuid,
     starts: String,
     ends: String,
     routes: Vec<Vec<String>>,
+    geometry_routes: Vec<String>,
     assets: Vec<Asset>,
     months: Vec<String>,
     available: bool,
@@ -162,6 +230,9 @@ struct Asset {
     name: String,
     station: Option<String>,
     grade: String,
+    exact_reach: Vec<String>,
+    baseline_reach: Vec<String>,
+    exit_verified: bool,
 }
 
 impl EvidencePlan {
@@ -173,25 +244,17 @@ impl EvidencePlan {
                 [&asset.id, &asset.name].map(|name| (asset.media, resource_key(asset.media, name)))
             })
             .collect();
-        let route_sets: BTreeSet<_> = self
-            .routes
-            .iter()
-            .map(|set| {
-                set.iter()
-                    .map(|route| bus_route_key(route))
-                    .collect::<BTreeSet<_>>()
-            })
-            .collect();
+        let route_sets: BTreeSet<_> = self.routes.iter().map(|set| route_keys(set)).collect();
         let matches =
             |medium, resource: &str| assets.contains(&(medium, resource_key(medium, resource)));
-        evidence
-            .reach
+        evidence.reach.iter().all(|row| {
+            matches(row.medium, &row.resource)
+                && (self.months.contains(&format!("2023-{:02}", row.month))
+                    || (row.month == 5 && (row.baseline || !row.unit_verified)))
+        }) && evidence
+            .shapes
             .iter()
-            .all(|row| matches(row.medium, &row.resource))
-            && evidence
-                .shapes
-                .iter()
-                .all(|shape| matches(shape.medium, &shape.resource))
+            .all(|shape| matches(shape.medium, &shape.resource))
             && evidence
                 .maps
                 .iter()
@@ -202,7 +265,7 @@ impl EvidencePlan {
 async fn plan(
     State(store): State<Store>,
     worker: Option<Extension<BrowserImport>>,
-) -> Result<Json<Vec<EvidencePlan>>, WebError> {
+) -> Result<Json<EvidenceManifest>, WebError> {
     let Extension(worker) = worker.ok_or(FORBIDDEN)?;
     let manifest = worker.request.evidence_plan.clone();
     if let Some(plans) = manifest.get() {
@@ -254,6 +317,7 @@ async fn plan(
         ends: Some(request.ends),
         required_routes: request.required_routes,
         target_centers: request.target_centers,
+        core_circle: request.core_circle,
         source: super::tasks::Source::Platform,
         batch: (batches.len() == 1)
             .then(|| pins.values().next().copied())
@@ -261,7 +325,12 @@ async fn plan(
         ..Options::default()
     };
     let budget = request.budget;
-    let policy = request.policy;
+    let mut policy = request.policy;
+    let policy = *tokio::time::timeout(Duration::from_secs(100), policy.wait_for(Option::is_some))
+        .await
+        .map_err(|_| POLICY_UNAVAILABLE)?
+        .map_err(|_| POLICY_UNAVAILABLE)?;
+    let policy = policy.ok_or(POLICY_UNAVAILABLE)?;
     let locked = request.portfolio;
     let variants = if let Some(mut rolling) = request.rolling {
         rolling.batches = pins.clone();
@@ -284,9 +353,22 @@ async fn plan(
         .await
         .map_err(|_| MISSING)?
     };
+    let overview_routes = variants
+        .iter()
+        .filter(|variant| variant.available && !variant.verified_route_overview())
+        .map(super::visuals::Variant::route_names)
+        .filter_map(|routes| {
+            let keys = route_keys(&routes);
+            (!keys.is_empty() && !request.saved_overview_routes.contains(&keys))
+                .then_some((keys, routes))
+        })
+        .collect::<BTreeMap<_, _>>()
+        .into_values()
+        .collect();
     let mut output = Vec::with_capacity(batches.len());
     for (starts, ends, _) in batches {
         let mut route_sets = BTreeSet::new();
+        let mut geometry_routes = BTreeSet::new();
         let mut assets = BTreeSet::new();
         let periods = || {
             variants
@@ -304,9 +386,24 @@ async fn plan(
                 .map(|row| row.stock.name.clone())
                 .collect::<BTreeSet<_>>();
             if !routes.is_empty() {
-                route_sets.insert(routes.into_iter().collect::<Vec<_>>());
+                let routes = routes.into_iter().collect::<Vec<_>>();
+                route_sets.insert(routes);
             }
             for row in &period.rows {
+                if row.media == BUS && !period.has_geometry(row) {
+                    geometry_routes.insert(row.stock.name.clone());
+                }
+                let (exact, baseline): (Vec<_>, Vec<_>) = row
+                    .evidence
+                    .iter()
+                    .filter(|entry| entry.row.platform_verified)
+                    .partition(|entry| entry.row.month == entry.applies_to);
+                let months = |entries: Vec<&super::visuals::Observation>| {
+                    entries
+                        .into_iter()
+                        .map(|entry| format!("2023-{:02}", entry.applies_to))
+                        .collect()
+                };
                 assets.insert(Asset {
                     media: row.media,
                     id: if row.stock.code.is_empty() {
@@ -317,6 +414,9 @@ async fn plan(
                     name: row.stock.name.clone(),
                     station: row.stock.station.clone(),
                     grade: row.stock.grade.clone(),
+                    exact_reach: months(exact),
+                    baseline_reach: months(baseline),
+                    exit_verified: row.media == Medium::Metro && row.has_platform_exit(),
                 });
             }
         }
@@ -327,6 +427,7 @@ async fn plan(
             starts,
             ends,
             routes: route_sets.into_iter().collect(),
+            geometry_routes: geometry_routes.into_iter().collect(),
             assets: assets.into_iter().collect(),
             months: (first..=last)
                 .map(|month| format!("2023-{month:02}"))
@@ -334,7 +435,14 @@ async fn plan(
             available,
         });
     }
-    Ok(Json(manifest.get_or_init(|| output).clone()))
+    Ok(Json(
+        manifest
+            .get_or_init(|| EvidenceManifest {
+                periods: output,
+                overview_routes,
+            })
+            .clone(),
+    ))
 }
 
 async fn submit(
@@ -352,7 +460,7 @@ async fn submit(
         .request
         .evidence_plan
         .get()
-        .and_then(|plans| plans.iter().find(|plan| plan.batch == batch))
+        .and_then(|manifest| manifest.periods.iter().find(|plan| plan.batch == batch))
         .ok_or(FORBIDDEN)?;
     if fields.len() != 1
         || files.is_empty()
@@ -362,13 +470,19 @@ async fn submit(
     {
         return Err((StatusCode::UNPROCESSABLE_ENTITY, "取证文件缺失或格式无效。"));
     }
-    let additions =
+    let mut additions =
         read_evidence(files).map_err(|detail| (StatusCode::UNPROCESSABLE_ENTITY, detail))?;
     if !plan.accepts(&additions) {
         return Err((
             StatusCode::UNPROCESSABLE_ENTITY,
-            "取证文件包含本档期入选范围外的资源或线路组合。",
+            "取证文件包含本档期入选范围外的资源、线路组合或统计月。",
         ));
+    }
+    for row in &mut additions.reach {
+        row.platform_verified = true;
+    }
+    for shape in &mut additions.shapes {
+        shape.platform_verified = true;
     }
     if let Some(proof) = &worker.request.proof {
         proof.stage(store, batch, additions).await?;
@@ -385,6 +499,9 @@ async fn submit(
         ).optional()?;
         let Some(before) = before else { return Ok(Err(FORBIDDEN)); };
         let mut dataset: Dataset = serde_json::from_str(&before).map_err(decode_error)?;
+        if let Err(error) = additions.check_exit_points(&dataset.stock, &dataset.coverage) {
+            return Ok(Err((StatusCode::UNPROCESSABLE_ENTITY, error)));
+        }
         if let Err(error) = dataset.evidence.supplement(additions, &dataset.stock) {
             return Ok(Err((StatusCode::UNPROCESSABLE_ENTITY, error)));
         }
@@ -430,6 +547,7 @@ mod tests {
             starts: "2027-07-01".into(),
             ends: "2027-07-31".into(),
             routes: vec![vec!["95路".into()], vec!["927路".into()]],
+            geometry_routes: vec![],
             assets: [("95", BUS), ("927", BUS), ("M-1", Medium::Metro)]
                 .map(|(id, media)| Asset {
                     media,
@@ -437,16 +555,19 @@ mod tests {
                     name: id.into(),
                     station: None,
                     grade: String::new(),
+                    exact_reach: vec![],
+                    baseline_reach: vec![],
+                    exit_verified: false,
                 })
                 .to_vec(),
-            months: Vec::new(),
+            months: vec!["2023-07".into()],
             available: true,
         };
         let mut evidence = Evidence {
             reach: vec![Reach {
                 medium: Medium::Metro,
                 resource: "m-1".into(),
-                month: 5,
+                month: 7,
                 daily: 20,
                 reference: "fixture".into(),
                 source: Source {
@@ -455,15 +576,26 @@ mod tests {
                 },
                 baseline: false,
                 unit_verified: true,
+                platform_verified: true,
             }],
             maps: vec![OfficialMap {
                 routes: vec!["95".into()],
                 image: String::new(),
                 captured_at: String::new(),
                 replayed: false,
+                basemap_verified: true,
             }],
             ..Evidence::default()
         };
+        assert!(plan.accepts(&evidence));
+        evidence.reach[0].month = 6;
+        assert!(!plan.accepts(&evidence));
+        evidence.reach[0].month = 5;
+        assert!(!plan.accepts(&evidence));
+        evidence.reach[0].baseline = true;
+        assert!(plan.accepts(&evidence));
+        evidence.reach[0].baseline = false;
+        evidence.reach[0].unit_verified = false;
         assert!(plan.accepts(&evidence));
         evidence.maps[0].routes.push("927".into());
         assert!(!plan.accepts(&evidence));

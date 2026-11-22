@@ -1,10 +1,11 @@
 .report-page {
-  --report-content: 1440px;
+  --report-content: 1380px;
   --report-inset: clamp(14px, 3vw, 32px);
   --report-radius: 8px;
   --report-warning: #805117;
   --report-warning-line: #f1d5a9;
   --report-warning-bg: #fff9ec;
+  background: #f5f7fa;
   line-height: 1.6;
 }
 .report-page .report-header {
@@ -51,18 +52,77 @@
   padding: var(--report-inset);
   border-radius: var(--report-radius);
 }
-.report-page main h2 { font-size: 1.2rem; }
+.report-page main h2 { font-size: 1.25rem; letter-spacing: -.015em; }
 .report-page main h3 { font-size: 1.02rem; }
 .report-page .report-cover { border-block-start: 3px solid var(--blue); }
 .report-cover-head p, .report-section-head p { margin-block-start: 5px; }
 .report-page .report-cover h1 { font-size: clamp(1.55rem, 3vw, 2.25rem); }
-.report-overview { gap: 12px; }
+.report-generated {
+  color: var(--muted);
+  font-size: .82rem;
+  font-variant-numeric: tabular-nums;
+}
+.report-page > .report-generated { max-width: var(--report-content); margin: 16px auto 0; padding-inline: var(--report-inset); }
+.report-recommendation {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 12px;
+  padding: 10px 14px;
+  border-inline-start: 3px solid var(--blue);
+  border-radius: 0 6px 6px 0;
+  background: var(--blue-soft);
+  color: var(--text);
+}
+.report-recommendation strong { color: var(--blue-strong); font-size: .9rem; }
+.report-page :is(.report-overview, .report-variant-metrics) {
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--report-radius);
+  background: var(--line);
+}
+.report-page :is(.report-overview, .report-variant-metrics) > div {
+  border: 0;
+  border-radius: 0;
+  background: var(--panel);
+}
+.report-page .report-overview { grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); }
 .report-page .report-overview dd {
   margin-block-start: 4px;
   font-size: clamp(1rem, 1.75vw, 1.32rem);
   line-height: 1.45;
 }
 .report-page .report-overview .report-dates { font-size: 1rem; line-height: 1.6; }
+.report-page .report-overview-title { font-size: clamp(1.25rem, 2.25vw, 1.65rem); margin-block-end: -6px; }
+.report-glance {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
+  gap: 12px;
+}
+.report-glance-card {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: clamp(12px, 2vw, 18px);
+  background: var(--blue-soft);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--report-radius);
+}
+.report-glance-card dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 148px), 1fr));
+  gap: 8px 16px;
+  margin: 0;
+}
+.report-glance-card dt { color: var(--muted); font-size: .83rem; }
+.report-glance-card dd { margin: 3px 0 0; color: var(--blue-strong); font-weight: 650; }
+.report-glance-card dd small { font-size: .56em; }
+.report-glance-quote dd { font-size: clamp(1.4rem, 2.4vw, 2rem); font-variant-numeric: tabular-nums; line-height: 1.2; }
+.report-glance-reach dd { font-size: clamp(.9rem, 1.35vw, 1.15rem); }
+.report-glance-reach dd.report-caption { color: var(--muted); font-size: .8rem; font-weight: 400; }
+.report-glance-scale { border-block-start: 1px solid var(--accent-line); padding-block-start: 8px; font-size: .83rem; }
+.report-glance-scale strong { color: var(--text); }
 .report-page .report-draft,
 .report-page .media-notice.warning {
   background: var(--report-warning-bg);
@@ -120,8 +180,12 @@
 .report-page .report-variant-group { gap: 12px; }
 .report-variant-group h4 { font-size: .95rem; font-weight: 650; }
 .report-page .report-variant-group + .report-variant-group { padding-block-start: 16px; }
-.report-page .report-variant .media-stats div { background: var(--rail); }
-.report-page .report-route-map { margin: 0 auto; width: 100%; max-inline-size: 960px; }
+.report-page .report-variant .report-variant-metrics { gap: 1px; }
+.report-page .report-variant .report-variant-metrics > div { background: var(--panel); }
+.report-page .report-variant .report-variant-metrics > div:first-child dd { color: var(--blue-strong); }
+.report-page .report-route-map { margin: 0 auto; width: 100%; max-inline-size: 1160px; }
+.report-page .report-phase-maps .report-route-map { margin-block: 12px 16px; }
+.report-page .report-phase-maps .report-route-map:last-child { margin-block-end: 4px; }
 @container report-variants (min-width: 1056px) {
   .report-page .report-variants:has(#report-view-all:checked) .report-variant-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -150,6 +214,13 @@
 .report-page .report-evidence > summary:hover,
 .report-page details.media-item > summary:hover { background: var(--blue-soft); }
 .report-page .report-supporting-data > summary { font-size: 1.12rem; }
+.report-page .report-schedule { grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr)); }
+.report-page .report-schedule strong { color: var(--text); font-variant-numeric: tabular-nums; }
+.report-page .report-schedule small { color: var(--report-warning); }
+.report-period-exposure { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 130px), 1fr)); gap: 8px 14px; margin-block: 10px; }
+.report-period-exposure div { padding-inline-start: 10px; border-inline-start: 2px solid var(--line); }
+.report-period-exposure dt { color: var(--muted); font-size: .84rem; }
+.report-period-exposure dd { margin: 0; font-size: .92rem; font-variant-numeric: tabular-nums; }
 .report-page .report-supporting-data > section + section {
   margin-block-start: 18px;
 }
@@ -195,6 +266,7 @@
   .report-page .report-variants { --variant-padding: 12px; }
 }
 @media print {
+  .report-page { background: white; }
   .report-page .report-header { position: static; padding-inline: 0; }
   .report-page main { padding: 0; }
   .report-page .report-variant-picker { display: none; }
@@ -208,6 +280,7 @@
     grid-template-rows: none;
   }
   .report-page .report-map-window { break-inside: avoid; }
+  .report-page .report-generated { break-after: avoid; }
   .report-page .task-rail { overflow: visible; }
   .report-page .report-table, .report-page .report-table tbody th { min-width: 0; }
   .report-page .report-table :is(th, td) { padding: 4px 5px; }

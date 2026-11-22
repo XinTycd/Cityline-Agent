@@ -1,4 +1,7 @@
-use std::{path::PathBuf, time::Duration};
+use std::{
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 use rusqlite::{Connection, OpenFlags, Transaction, TransactionBehavior, params};
 
@@ -9,6 +12,13 @@ const VERSION: i64 = 8;
 pub(crate) struct Store(PathBuf);
 
 impl Store {
+    pub(crate) fn directory(&self) -> &Path {
+        self.0
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."))
+    }
+
     pub(crate) fn initialize(path: PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
         if let Some(parent) = path
             .parent()

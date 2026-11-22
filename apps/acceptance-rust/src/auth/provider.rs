@@ -11,6 +11,7 @@ use openidconnect::{
 };
 use serde::{Deserialize, de::DeserializeOwned};
 use serde_json::json;
+use std::io::Read;
 use uuid::Uuid;
 
 use super::{Auth, BAD_LOGIN, FLOW, LoginConfig, LoginMode, UNAVAILABLE, User, audit, read_cookie};
@@ -91,6 +92,23 @@ pub(super) fn validate_config(config: &LoginConfig) -> Result<(), WebError> {
     Ok(())
 }
 
+fn provider_ca(variable: &str) -> Result<Option<Vec<u8>>, WebError> {
+    let Some(path) = std::env::var_os(variable).filter(|path| !path.is_empty()) else {
+        return Ok(None);
+    };
+    const MAX_CA_BYTES: u64 = 256 * 1024;
+    let mut pem = Vec::new();
+    std::fs::File::open(path)
+        .map_err(|_| UNAVAILABLE)?
+        .take(MAX_CA_BYTES + 1)
+        .read_to_end(&mut pem)
+        .map_err(|_| UNAVAILABLE)?;
+    if pem.len() as u64 > MAX_CA_BYTES {
+        return Err(UNAVAILABLE);
+    }
+    Ok(Some(pem))
+}
+
 fn oidc_http(timeout: u32) -> Result<openidconnect::reqwest::Client, WebError> {
     let mut http = openidconnect::reqwest::Client::builder()
         .no_proxy()
@@ -98,17 +116,7 @@ fn oidc_http(timeout: u32) -> Result<openidconnect::reqwest::Client, WebError> {
         .https_only(true)
         .timeout(Duration::from_secs(u64::from(timeout.min(25))))
         .connect_timeout(Duration::from_secs(5));
-    if let Some(path) = std::env::var_os("CITYLINE_OIDC_CA_FILE") {
-        use std::io::Read;
-        let mut pem = Vec::new();
-        std::fs::File::open(path)
-            .map_err(|_| UNAVAILABLE)?
-            .take(256 * 1024 + 1)
-            .read_to_end(&mut pem)
-            .map_err(|_| UNAVAILABLE)?;
-        if pem.len() > 256 * 1024 {
-            return Err(UNAVAILABLE);
-        }
+    if let Some(pem) = provider_ca("CITYLINE_OIDC_CA_FILE")? {
         let authority =
             openidconnect::reqwest::Certificate::from_pem(&pem).map_err(|_| UNAVAILABLE)?;
         http = http.add_root_certificate(authority);
@@ -233,35 +241,47 @@ pub(super) async fn callback(
     let Some(flow) = flow else {
         return Ok(retry());
     };
-    if flow.expires <= Instant::now() || flow.version != version {
-        return rejected(&auth, "认证会话已过期或登录配置已改变。").await;
+    if flow.expires <= Instant::now() {
+        return rejected(&auth, "认证会话已过期。", true).await;
+    }
+    if flow.version != version {
+        return rejected(&auth, "认证期间登录配置已改变。", false).await;
     }
     let Ok(Query(query)) = query else {
-        return rejected(&auth, "认证回调参数无法读取。").await;
+        return rejected(&auth, "认证回调参数无法读取。", false).await;
     };
     if query.state.as_deref() != Some(flow.state.as_str()) {
-        return rejected(&auth, "认证回调状态未通过校验。").await;
+        return rejected(&auth, "认证回调状态未通过校验。", false).await;
     }
     let Some(code) = query.code.filter(|value| {
         !value.is_empty() && value.len() <= 4096 && !value.chars().any(char::is_control)
     }) else {
-        return rejected(&auth, "提供方未返回有效授权。").await;
+        return rejected(&auth, "提供方未返回有效授权。", false).await;
     };
-    let user = match flow.provider {
-        Provider::Oidc { client, nonce } => {
-            oidc_user(&client, flow.verifier, nonce, code, config.provider_timeout).await
+    let deadline = tokio::time::Instant::from_std(flow.expires);
+    let verify = async {
+        match flow.provider {
+            Provider::Oidc { client, nonce } => {
+                oidc_user(&client, flow.verifier, nonce, code, config.provider_timeout).await
+            }
+            Provider::Feishu => feishu_user(&auth, &config, flow.verifier, &code).await,
         }
-        Provider::Feishu => feishu_user(&auth, &config, flow.verifier, &code).await,
     };
-    match user {
-        Ok(user) => auth.complete_login(user, version, "外部登录成功").await,
-        Err(_) => rejected(&auth, "提供方未通过验证，或账号未获授权。").await,
+    match tokio::time::timeout_at(deadline, verify).await {
+        Ok(Ok(user)) => auth.complete_login(user, version, "外部登录成功").await,
+        Ok(Err(_)) => rejected(&auth, "提供方未通过验证，或账号未获授权。", false).await,
+        Err(_) => rejected(&auth, "提供方未能在认证时限内完成验证。", true).await,
     }
 }
 
-async fn rejected(auth: &Auth, reason: &'static str) -> Result<Response, WebError> {
+async fn rejected(auth: &Auth, reason: &'static str, expired: bool) -> Result<Response, WebError> {
     audit::record(&auth.store, "登录", "外部登录失败", None, reason.into()).await?;
-    Ok(auth.cookie_response("/demo/sign-in?failed=1", FLOW, "", 0))
+    let next = if expired {
+        "/demo/sign-in?expired=1"
+    } else {
+        "/demo/sign-in?failed=1"
+    };
+    Ok(auth.cookie_response(next, FLOW, "", 0))
 }
 
 fn allowed(name: &str, id: &str) -> bool {
@@ -317,6 +337,7 @@ async fn oidc_user(
         admin: allowed("CITYLINE_OIDC_ADMINS", subject),
         method: LoginMode::Oidc,
         avatar: None,
+        platform_scope: Uuid::nil(),
     })
 }
 
@@ -389,16 +410,19 @@ async fn feishu_user(
     code: &str,
 ) -> Result<User, WebError> {
     let app_secret = env("CITYLINE_FEISHU_APP_SECRET").ok_or(BAD_LOGIN)?;
-    let http = reqwest::Client::builder()
+    let mut http = reqwest::Client::builder()
         .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
         .https_only(true)
         .connect_timeout(Duration::from_secs(5))
         .timeout(Duration::from_secs(u64::from(
             config.provider_timeout.min(25),
-        )))
-        .build()
-        .map_err(|_| UNAVAILABLE)?;
+        )));
+    if let Some(pem) = provider_ca("CITYLINE_FEISHU_CA_FILE")? {
+        let authority = reqwest::Certificate::from_pem(&pem).map_err(|_| UNAVAILABLE)?;
+        http = http.tls_certs_merge([authority]);
+    }
+    let http = http.build().map_err(|_| UNAVAILABLE)?;
     let token_endpoint = endpoint("CITYLINE_FEISHU_TOKEN_ENDPOINT").ok_or(UNAVAILABLE)?;
     let profile_endpoint = endpoint("CITYLINE_FEISHU_PROFILE_ENDPOINT").ok_or(UNAVAILABLE)?;
     let token: FeishuToken = feishu_json(
@@ -448,6 +472,7 @@ async fn feishu_user(
         admin: allowed("CITYLINE_FEISHU_ADMINS", &profile.open_id),
         method: LoginMode::Feishu,
         avatar,
+        platform_scope: Uuid::nil(),
     })
 }
 

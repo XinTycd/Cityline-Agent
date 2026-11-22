@@ -1,6 +1,6 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { cloudClient, cloudOrigin, cloudPath, redClient, redOrigin, redPath, archive } from './contest-http.mjs';
+import { cloudClient, cloudOrigin, cloudPath, redClient, redOrigin, redPath, archive, sessionRejected } from './contest-http.mjs';
 import { acquireDirectEvidence } from './contest-direct-evidence.mjs';
 import { captureContestMap } from './contest-map-screenshot.mjs';
 
@@ -28,23 +28,34 @@ if ((!proofOnly && !tariff) || industry !== 'food'
 const headers = { Origin: origin, 'X-Cityline-Media-Import': process.env.CITYLINE_MEDIA_IMPORT_TOKEN };
 if (!headers['X-Cityline-Media-Import']) throw new Error('Missing task authorization');
 const savedCloudSession = process.env.CITYLINE_NEWCLOUD_SESSION;
+const cachedCloudSession = process.env.CITYLINE_NEWCLOUD_REUSED === '1';
 const savedRedToken = process.env.CITYLINE_REDBEAN_ACCESS_TOKEN;
 const savedRedTenant = process.env.CITYLINE_REDBEAN_TENANT_ID || '1';
 delete process.env.CITYLINE_MEDIA_IMPORT_TOKEN;
 delete process.env.CITYLINE_NEWCLOUD_SESSION;
+delete process.env.CITYLINE_NEWCLOUD_REUSED;
 delete process.env.CITYLINE_REDBEAN_ACCESS_TOKEN;
 delete process.env.CITYLINE_REDBEAN_TENANT_ID;
 const authenticated = { newcloud: false, redbean: false };
 const inventory = { api: 0, exports: 0 };
+let imported = 0;
 let redbeanFallback = false;
+let newcloudFallback = false;
+let newcloudReused = false;
+let newcloudCached = false;
 let currentPeriod = null;
 let browser;
 let captureContext;
 let phase = 'launch';
 let pendingStatus = Promise.resolve();
+let finished = false;
 
-async function status(state, report = null, evidence = null) {
-  const payload = JSON.stringify({ state, report, period: currentPeriod, evidence, inventory, redbeanFallback, ...authenticated });
+async function status(state, report = null, evidence = null, reachChecks = []) {
+  if (finished) return;
+  finished = state === 'done' || state === 'needs_review' || state.startsWith('error_');
+  const payload = JSON.stringify({
+    state, report, period: currentPeriod, evidence, reachChecks, inventory, imported, redbeanFallback, newcloudFallback, newcloudReused, newcloudCached, ...authenticated,
+  });
   const path = join(directory, 'status.json');
   pendingStatus = pendingStatus.catch(() => {}).then(async () => {
     await writeFile(path + '.tmp', payload, 'utf8');
@@ -53,13 +64,13 @@ async function status(state, report = null, evidence = null) {
   await pendingStatus;
 }
 
-async function openLogin(page, target) {
+async function openLogin(page, target, platform) {
   try {
     const result = await page.goto(target, { waitUntil: 'domcontentloaded', timeout: 16000 });
     if (result && result.status() < 400) return;
   } catch {}
   const error = new Error('Login page unavailable');
-  error.platformStage = 'connection';
+  error.platformStage = platform + '_connection';
   throw error;
 }
 
@@ -69,17 +80,52 @@ async function mark(which, result) {
   return result;
 }
 
-async function sessions() {
-  let cloudSession = savedCloudSession;
-  if (proofOnly && cloudSession) {
-    const cloud = cloudClient(cloudSession);
-    try {
-      await cloud.routeCatalog();
-      return [await mark('newcloud', cloud), null];
-    } catch {
-      cloudSession = null;
-    }
+async function queryCoverage(cloud) {
+  const centers = activeSupplement ? [...primaryCenters, activeSupplement] : primaryCenters;
+  return cloud.coverage(centers, radius, media, Boolean(activeSupplement));
+}
+
+async function verifyCloud(session, reused = false) {
+  if (!session) {
+    const error = new Error('Newcloud did not provide a session');
+    error.platformStage = 'newcloud_auth';
+    throw error;
   }
+  const client = cloudClient(session);
+  try {
+    const coverage = proofOnly ? (await client.routeCatalog(), null) : await queryCoverage(client);
+    newcloudReused = reused;
+    return await mark('newcloud', { client, coverage });
+  } catch (error) {
+    error.platformStage = sessionRejected(error) ? 'newcloud_auth' : proofOnly ? 'proof' : 'coverage';
+    throw error;
+  }
+}
+
+async function updateCloudCache(session, maxAge) {
+  const response = await fetch(origin + '/api/media-refresh/newcloud-session', {
+    method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ session, max_age: maxAge }), signal: AbortSignal.timeout(3000),
+  }).catch(() => null);
+  return response?.status === 204;
+}
+
+async function verifiedCloudSession() {
+  if (!savedCloudSession) return null;
+  try {
+    return await verifyCloud(savedCloudSession, cachedCloudSession);
+  } catch (error) {
+    if (error.platformStage !== 'newcloud_auth') throw error;
+    if (cachedCloudSession) await updateCloudCache(null);
+    newcloudFallback = true;
+    await status('login');
+    return null;
+  }
+}
+
+async function sessions() {
+  phase = 'login';
+  await status('login');
   const dates = { startDate: requested[0].starts, endDate: requested[0].ends };
   const verifyRed = async (token, tenant) => {
     let client;
@@ -93,12 +139,23 @@ async function sessions() {
     }
     return mark('redbean', client);
   };
-  const cachedRed = !proofOnly && savedRedToken
-    ? verifyRed(savedRedToken, savedRedTenant).catch(() => null)
-    : Promise.resolve(null);
-  if (cloudSession) {
-    const verified = await cachedRed;
-    if (verified) return [cloudClient(cloudSession), verified];
+  const [verifiedCloud, verifiedRed] = await Promise.all([
+    verifiedCloudSession(),
+    !proofOnly && savedRedToken ? verifyRed(savedRedToken, savedRedTenant).catch(() => null) : null,
+  ]);
+  if (verifiedCloud && (proofOnly || verifiedRed)) {
+    return [verifiedCloud.client, verifiedRed, verifiedCloud.coverage];
+  }
+  let cloudLogin;
+  if (!verifiedCloud) {
+    try {
+      cloudLogin = cloudOrigin + cloudPath('LOGIN');
+      cloudPath('LANDING');
+      if (!process.env.CITYLINE_NEWCLOUD_READY_MARKER?.trim()) throw new Error('Missing Newcloud sign-in marker');
+    } catch (error) {
+      error.platformStage = 'newcloud_auth';
+      throw error;
+    }
   }
   // The visible pages are for operator-completed sign-in.
   phase = 'launch';
@@ -106,14 +163,14 @@ async function sessions() {
   browser = await chromium.launch({ channel: 'msedge', headless: false });
   const context = await browser.newContext();
   captureContext = context;
-  const newcloud = cloudSession ? null : await context.newPage();
-  if (cloudSession) await addCloudCookies(context, cloudSession);
+  const newcloud = verifiedCloud ? null : await context.newPage();
+  if (verifiedCloud) await addCloudCookies(context, savedCloudSession);
   phase = 'login';
   await status('login');
 
-  return Promise.all([
+  const [cloud, red] = await Promise.all([
     newcloud ? (async () => {
-      await openLogin(newcloud, cloudOrigin + cloudPath('LOGIN'));
+      await openLogin(newcloud, cloudLogin, 'newcloud');
       await newcloud.bringToFront();
       await newcloud.waitForFunction(
         ({ origin, landing, marker }) => location.origin === origin && location.pathname === landing
@@ -121,14 +178,18 @@ async function sessions() {
         { origin: cloudOrigin, landing: cloudPath('LANDING'), marker: process.env.CITYLINE_NEWCLOUD_READY_MARKER },
         { timeout: 240000 },
       );
-      const session = (await context.cookies(cloudOrigin)).map(({ name, value }) => name + '=' + value).join('; ');
-      return mark('newcloud', cloudClient(session));
-    })() : cloudClient(cloudSession),
+      const cookies = await context.cookies(cloudOrigin);
+      const session = cookies.map(({ name, value }) => name + '=' + value).join('; ');
+      const verified = await verifyCloud(session);
+      const expires = cookies.filter(cookie => cookie.expires > 0).map(cookie => cookie.expires);
+      const remaining = expires.length > 0 ? Math.max(0, Math.floor(Math.min(...expires) - Date.now() / 1000)) : undefined;
+      newcloudCached = await updateCloudCache(session, remaining);
+      return verified;
+    })() : verifiedCloud,
     proofOnly ? null : (async () => {
-      const verified = await cachedRed;
-      if (verified) return verified;
+      if (verifiedRed) return verifiedRed;
       const redbean = await context.newPage();
-      await openLogin(redbean, redOrigin + redPath('LOGIN'));
+      await openLogin(redbean, redOrigin + redPath('LOGIN'), 'redbean');
       if (savedRedToken) {
         redbeanFallback = true;
         await status('login');
@@ -149,6 +210,7 @@ async function sessions() {
       return verifyRed(result?.token, result?.tenant);
     })(),
   ]);
+  return [cloud.client, red, cloud.coverage];
 }
 
 async function addCloudCookies(context, cookie) {
@@ -180,7 +242,7 @@ async function readInventory(red, medium, dates) {
     const bytes = medium === 'bus' ? await red.bus(dates, requiredRoutes) : await red.metro(dates);
     return [medium + '_stock', '红豆库存API-' + label + '.csv', bytes];
   } catch (error) {
-    if (/returned HTTP (401|403)\b/u.test(error?.message ?? '')) throw error;
+    if (sessionRejected(error)) throw error;
     return exportInventory(red, medium, dates);
   }
 }
@@ -214,11 +276,16 @@ async function importSources(window, acquired) {
   return '/media-plans?' + params;
 }
 
-async function collectInventory(cloud, red) {
+async function collectInventory(cloud, red, verifiedCoverage) {
   phase = 'coverage';
   await status('coverage');
-  const centers = activeSupplement ? [...primaryCenters, activeSupplement] : primaryCenters;
-  const coverage = await cloud.coverage(centers, radius, media, Boolean(activeSupplement));
+  let coverage;
+  try {
+    coverage = verifiedCoverage ?? await queryCoverage(cloud);
+  } catch (error) {
+    if (sessionRejected(error)) error.platformStage = 'newcloud_auth';
+    throw error;
+  }
   authenticated.newcloud = true;
   await archive(directory, '新云接口覆盖原始响应.json', JSON.stringify(coverage.rows));
   await archive(directory, '新云接口覆盖.csv', coverage.csv);
@@ -261,8 +328,12 @@ async function collectInventory(cloud, red) {
       }
       inventory.api += sources.filter(isApi).length;
       inventory.exports += sources.filter(([, name]) => name.startsWith('红豆官方导出-')).length;
+      imported += 1;
     } catch (error) {
-      if (/returned HTTP (401|403)\b/u.test(error?.message ?? '')) throw error;
+      if (sessionRejected(error)) {
+        error.platformStage = 'redbean_auth';
+        throw error;
+      }
       missed.push({ starts, ends, phase, error: error?.message?.slice(0, 180) });
     }
   }
@@ -274,29 +345,30 @@ async function collectInventory(cloud, red) {
 try {
   await mkdir(directory, { recursive: true });
   await status('opening');
-  const [cloud, red] = await sessions();
+  const [cloud, red, verifiedCoverage] = await sessions();
   const { receipt, missed } = proofOnly
     ? { receipt: null, missed: [] }
-    : await collectInventory(cloud, red);
+    : await collectInventory(cloud, red, verifiedCoverage);
   phase = 'proof';
   currentPeriod = null;
   await status('proof');
-  let checkpoint = null;
+  let checkpoint = { overview: null, reachChecks: [] };
   try {
-    const evidence = await acquireDirectEvidence(cloud, directory, origin, headers, async (plan, overview) => {
-      currentPeriod = plan.starts + ' 至 ' + plan.ends;
-      checkpoint = { ...overview };
-      await status('proof', null, checkpoint);
+    const { overview: evidence, reachChecks } = await acquireDirectEvidence(cloud, directory, origin, headers, async (plan, overview, checks) => {
+      currentPeriod = plan ? plan.starts + ' 至 ' + plan.ends : null;
+      checkpoint = { overview: { ...overview }, reachChecks: checks.slice() };
+      await status('proof', null, checkpoint.overview, checkpoint.reachChecks);
     }, async (routes, catalog, filename) => captureContestMap(await screenshotContext(), directory, routes, catalog, filename));
     const complete = !missed.length && !evidence.unavailablePeriods
-      && evidence.maps === evidence.expectedMaps && evidence.reach === evidence.expectedReach;
-    await status(complete ? 'done' : 'needs_review', receipt, evidence);
+      && evidence.reach === evidence.expectedReach
+      && evidence.exits === evidence.expectedExits && evidence.overviewMaps === evidence.expectedOverviewMaps;
+    await status(complete ? 'done' : 'needs_review', receipt, evidence, reachChecks);
   } catch (error) {
-    await archive(directory, '取数诊断.json', JSON.stringify({ phase, error: error?.message?.slice(0, 180) }));
-    await status('needs_review', receipt, checkpoint);
+    await archive(directory, '获取数据诊断.json', JSON.stringify({ phase, error: error?.message?.slice(0, 180) }));
+    await status('needs_review', receipt, checkpoint.overview, checkpoint.reachChecks);
   }
 } catch (error) {
-  await archive(directory, '取数诊断.json', JSON.stringify({ phase, error: error?.message?.slice(0, 180) })).catch(() => {});
+  await archive(directory, '获取数据诊断.json', JSON.stringify({ phase, error: error?.message?.slice(0, 180) })).catch(() => {});
   await status('error_' + (error?.platformStage ?? phase));
   process.exitCode = 1;
 } finally {

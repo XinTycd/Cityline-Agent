@@ -55,12 +55,13 @@
       const steps = Array.from(taskProgress.querySelectorAll('[data-task-step]'), (choice) => {
         const step = choice.labels[0];
         return {
+          index: Number(choice.dataset.taskStep),
           choice,
           step,
           label: step.querySelector('[data-step-state]'),
           notes: document.getElementById(choice.getAttribute('aria-controls')).querySelector('[data-step-notes]'),
         };
-      });
+      }).sort((a, b) => a.index - b.index);
       let currentStep = steps.findIndex(({ choice }) => choice.defaultChecked);
       let followProgress = steps[currentStep].choice.checked;
       for (const [index, { choice }] of steps.entries()) {
@@ -68,24 +69,38 @@
       }
       const delivery = scope.querySelector('[data-task-delivery]');
       const ready = delivery.querySelector('[data-task-ready]');
+      const review = delivery.querySelector('[data-task-review]');
+      const budgetConfirmation = review?.querySelector('[data-budget-confirmation]');
+      const generationTime = delivery.querySelector('[data-generation-time]');
+      const agentTraceLink = scope.querySelector('[data-agent-trace-link]');
+      const scheduleRevisionLink = scope.querySelector('[data-schedule-revision-link]');
       const blocked = delivery.querySelector('[data-task-blocked]');
-      const alternative = delivery.querySelector('[data-task-alternative]');
+      const publicationChecklist = blocked.querySelector('[data-publication-checklist]');
+      const reportLinks = delivery.querySelector('[data-task-report-links]');
+      const platformOutcome = delivery.querySelector('[data-platform-outcome]');
       const login = scope.querySelector('[data-platform-dialog]');
       const showLogin = scope.querySelector('[data-show-platform-dialog]');
       const evaluation = delivery.querySelector('[data-task-evaluation]');
       const localSnapshot = delivery.querySelector('[data-local-snapshot]');
       const operationsReview = delivery.querySelector('[data-ops-review]');
       const proofRefresh = delivery.querySelector('[data-proof-refresh]');
+      const goalConfirmation = delivery.querySelector('[data-goal-confirmation]');
+      const routeReplacement = delivery.querySelector('[data-route-replacement]');
       const recoverySnapshots = localSnapshot?.querySelector('[data-recovery-snapshots]');
       const sameInventory = localSnapshot?.querySelector('[data-same-inventory]');
       const platformChecks = Array.from(login?.querySelectorAll('[data-platform-check]') ?? []);
-      if (login && !platformChecks.every((item) => item.textContent.includes('✓'))) {
+      let loginShown = false;
+      function showPlatform(phase) {
+        if (!login || loginShown || !phase || phase.startsWith('error_') ||
+            platformChecks.every((item) => item.textContent.includes('✓'))) return;
+        loginShown = true;
         showLogin.hidden = false;
         showLogin.addEventListener('click', () => {
           if (!login.open) login.showModal();
         }, { signal });
         login.showModal();
       }
+      showPlatform(login?.dataset.platformDialog);
       async function updateProgress() {
         if (signal.aborted) return;
         let delay = 900;
@@ -97,6 +112,7 @@
           error.hidden = true;
           if (summary.textContent !== progress.summary) summary.textContent = progress.summary;
           if (status.textContent !== progress.status) status.textContent = progress.status;
+          if (agentTraceLink) agentTraceLink.hidden = !progress.has_agent_trace;
           if (login && progress.login) {
             for (const item of platformChecks) {
               const label = progress.login[item.dataset.platformCheck] ? '✓ 已认证' : '待认证';
@@ -105,6 +121,8 @@
             if (platformChecks.every((item) => progress.login[item.dataset.platformCheck]) || progress.state !== 'active') {
               showLogin.hidden = true;
               if (login.open) login.close();
+            } else {
+              showPlatform(progress.login.phase);
             }
           }
           for (const [index, snapshot] of progress.steps.entries()) {
@@ -121,13 +139,28 @@
           if (followProgress) steps[currentStep].choice.checked = true;
           if (progress.state !== 'active') {
             taskProgress.removeAttribute('data-active');
-            ready.hidden = progress.state !== 'done';
-            blocked.hidden = progress.state === 'done' || !progress.has_alternative;
-            alternative.hidden = !progress.has_alternative;
+            const reportVisible = progress.state === 'done' || progress.state === 'demo';
+            ready.hidden = !reportVisible;
+            if (review) review.hidden = !progress.offer_review;
+            if (budgetConfirmation) budgetConfirmation.hidden = !progress.budget_confirmation_required;
+            if (generationTime && progress.generation_time) {
+              generationTime.textContent = '本版本生成耗时 ' + progress.generation_time;
+              generationTime.hidden = false;
+            }
+            blocked.hidden = progress.offer_report;
+            publicationChecklist.hidden = !progress.offer_proof_refresh;
+            reportLinks.hidden = !progress.offer_report;
+            platformOutcome.hidden = !progress.platform_interrupted;
+            for (const item of platformOutcome.querySelectorAll('[data-auth-result]')) {
+              item.textContent = progress.login[item.dataset.authResult] ? '已确认' : '未确认';
+            }
             if (evaluation) evaluation.hidden = !progress.offer_evaluation;
             if (localSnapshot) localSnapshot.hidden = !progress.offer_local_snapshot;
             if (operationsReview) operationsReview.hidden = !progress.offer_operations;
+            if (scheduleRevisionLink) scheduleRevisionLink.hidden = !progress.offer_schedule_revision;
             if (proofRefresh) proofRefresh.hidden = !progress.offer_proof_refresh;
+            if (goalConfirmation) goalConfirmation.hidden = !progress.offer_goal_confirmation;
+            if (routeReplacement) routeReplacement.hidden = !progress.offer_route_replacement;
             if (sameInventory) sameInventory.hidden = !progress.offer_same_inventory;
             if (recoverySnapshots && progress.recovery_snapshots?.length) {
               const task = taskProgress.dataset.taskProgress.split('/').pop();
@@ -152,6 +185,37 @@
         setTimeout(updateProgress, delay);
       }
       void updateProgress();
+    }
+    function bindOverview(scope, signal) {
+      const queues = scope.querySelector('[data-overview-queues]');
+      if (!queues) return;
+      const warning = scope.querySelector('[data-overview-warning]');
+      let timer;
+      const delay = () => queues.hasAttribute('data-running') ? 1800 : 4500;
+      async function update() {
+        if (signal.aborted) return;
+        if (!document.hidden && !queues.contains(document.activeElement)) {
+          try {
+            const response = await fetch('/overview/queues', { signal });
+            if (!response.ok || response.redirected) throw new Error('无法更新总览。');
+            const next = new DOMParser().parseFromString(await response.text(), 'text/html')
+              .querySelector('[data-overview-queues]');
+            if (signal.aborted) return;
+            if (!next) throw new Error('无法读取任务队列。');
+            if (!queues.contains(document.activeElement) && next.innerHTML !== queues.innerHTML) {
+              queues.replaceChildren(...next.childNodes);
+              queues.toggleAttribute('data-running', next.hasAttribute('data-running'));
+            }
+            warning.hidden = true;
+          } catch {
+            if (signal.aborted) return;
+            warning.hidden = false;
+          }
+        }
+        timer = setTimeout(update, warning.hidden ? delay() : 5000);
+      }
+      timer = setTimeout(update, delay());
+      signal.addEventListener('abort', () => clearTimeout(timer), { once: true });
     }
     function synchronizeSidebar() {
       const collapsed = root.hasAttribute('data-sidebar-collapsed');
@@ -233,31 +297,53 @@
       }
       const modelSettings = scope.querySelector('[data-agent-model]');
       if (modelSettings) {
-        const mode = modelSettings.elements.namedItem('mode');
-        const fields = modelSettings.querySelector('[data-agent-model-fields]');
-        const keyField = modelSettings.querySelector('[data-agent-key-field]');
-        const environmentNote = modelSettings.querySelector('[data-agent-environment-note]');
-        const hasEnvironmentModel = modelSettings.hasAttribute('data-agent-environment-configured');
-        const showInheritedModel = mode.value === 'environment' && hasEnvironmentModel;
-        const syncModelSettings = () => {
-          const editable = mode.value === 'cloud' || mode.value === 'local';
-          const environment = mode.value === 'environment';
-          fields.hidden = !(editable || (environment && showInheritedModel));
-          environmentNote.hidden = !environment || showInheritedModel;
-          for (const input of fields.querySelectorAll('input')) {
-            input.readOnly = !editable;
-            input.required = editable;
-          }
-          if (keyField) {
-            keyField.hidden = !(editable || (environment && hasEnvironmentModel));
-            keyField.querySelector('input').disabled = keyField.hidden;
-          }
-        };
-        mode.addEventListener('change', () => {
-          if (keyField) keyField.querySelector('input').value = '';
-          syncModelSettings();
-        }, { signal });
-        syncModelSettings();
+        const setup = modelSettings.elements.namedItem('scope');
+        const profiles = Array.from(modelSettings.querySelectorAll('[data-model-profile]'), (panel) => {
+          const source = panel.querySelector('[data-model-source]');
+          const protocol = panel.querySelector('[data-model-protocol]');
+          const custom = panel.querySelector('[data-model-custom]');
+          const inherited = panel.querySelector('[data-model-inherited]');
+          const endpoint = panel.querySelector('[data-model-endpoint]');
+          const keyField = panel.querySelector('[data-agent-key-field]');
+          const key = keyField?.querySelector('input');
+          let customProtocol = protocol.dataset.modelProtocol;
+          const sync = () => {
+            const visible = panel.dataset.modelProfile === setup.value;
+            const server = source.value === 'environment';
+            panel.hidden = !visible;
+            custom.hidden = server;
+            inherited.hidden = !server;
+            protocol.value = server ? modelSettings.dataset.inheritedProtocol : customProtocol;
+            const origin = source.value === 'local' ? 'http://127.0.0.1:11434' : 'https://api.example.com';
+            endpoint.placeholder = origin + protocol.selectedOptions[0].dataset.path;
+            for (const control of panel.querySelectorAll('[name]')) control.disabled = !visible;
+            protocol.disabled ||= server;
+            for (const input of custom.querySelectorAll('input')) {
+              input.disabled ||= server;
+              input.required = !server && visible;
+            }
+            if (keyField) {
+              keyField.hidden = server && !inherited.querySelector('input');
+              key.disabled ||= keyField.hidden;
+            }
+          };
+          source.addEventListener('change', () => {
+            if (key) key.value = '';
+            sync();
+          }, { signal });
+          protocol.addEventListener('change', () => {
+            customProtocol = protocol.value;
+            if (key) key.value = '';
+            sync();
+          }, { signal });
+          endpoint.addEventListener('input', () => {
+            if (key) key.value = '';
+          }, { signal });
+          return sync;
+        });
+        const syncProfiles = () => profiles.forEach((sync) => sync());
+        for (const radio of setup) radio.addEventListener('change', syncProfiles, { signal });
+        syncProfiles();
       }
       const loginSettings = scope.querySelector('[data-login-settings]');
       if (loginSettings) {
@@ -279,6 +365,34 @@
       }
       const extraction = scope.querySelector('[data-brief-extraction]');
       const taskForm = scope.querySelector('[data-task-create]');
+      for (const trial of scope.querySelectorAll('[data-trial-fields]')) {
+        const form = trial.closest('form');
+        const goal = form.querySelector('select[name="brief_campaign_goal"], select[name="goal"]');
+        const syncTrial = () => {
+          const active = goal.value === '到店';
+          trial.hidden = !active;
+          for (const input of trial.querySelectorAll('input')) input.disabled = !active;
+          const monitoring = form.elements.namedItem('monitoring');
+          if (monitoring) monitoring.required = !active;
+        };
+        goal.addEventListener('change', syncTrial, { signal });
+        syncTrial();
+      }
+      const targetCenters = taskForm?.elements.namedItem('target_centers');
+      const coreChoices = taskForm?.querySelector('[data-default-centers]');
+      if (targetCenters && coreChoices) {
+        const updateCoreChoices = () => {
+          const lines = targetCenters.value.split(/\r?\n/u).map(line => line.trim()).filter(Boolean);
+          const choices = lines.length ? lines : coreChoices.dataset.defaultCenters.split('|');
+          coreChoices.replaceChildren(...Array.from(new Set(choices), name => {
+            const item = document.createElement('option');
+            item.value = name;
+            return item;
+          }));
+        };
+        targetCenters.addEventListener('input', updateCoreChoices, { signal });
+        updateCoreChoices();
+      }
       for (const range of scope.querySelectorAll('[data-date-range]')) {
         const starts = range.querySelector('[name="starts"]');
         const ends = range.querySelector('[name="ends"]');
@@ -326,6 +440,22 @@
         const status = extraction.querySelector('[data-brief-status]');
         const review = taskForm.querySelector('[data-brief-review]');
         const field = (name) => taskForm.elements.namedItem(name);
+        const sample = review.querySelector('[data-fill-campaign-case]');
+        function applySample(reveal) {
+          const values = JSON.parse(sample.dataset.fillCampaignCase);
+          for (const [name, value] of Object.entries(values)) field(name).value = value;
+          field('ends').dispatchEvent(new Event('input', { bubbles: true }));
+          field('target_centers').dispatchEvent(new Event('input', { bubbles: true }));
+          field('brief_campaign_goal').dispatchEvent(new Event('change', { bubbles: true }));
+          if (reveal) {
+            field('scheduling_factors').closest('details').open = true;
+            taskForm.querySelector('[data-trial-fields]').open = true;
+          }
+          field('brief_confirmed').disabled = false;
+          field('brief_confirmed').checked = false;
+        }
+        sample.addEventListener('click', () => applySample(true), { signal });
+        applySample(false);
         inputForm.addEventListener('submit', async (event) => {
           event.preventDefault();
           button.disabled = true;
@@ -345,13 +475,24 @@
             }
             field('required_routes').value = summary.required_routes.join('、');
             field('hard_cap_wan').value = summary.budget_cap_wan ?? '';
+            field('scheduling_factors').value = '';
+            field('target_centers').value = '';
+            field('core_circle').value = '';
+            field('target_centers').dispatchEvent(new Event('input', { bubbles: true }));
             field('brief_used').value = '1';
             field('brief_customer_profile').value = summary.brief.customer_profile;
             field('brief_objective').value = summary.brief.objective;
             field('brief_campaign_goal').value = summary.brief.campaign_goal;
+            field('brief_comparison_focus').value = summary.brief.comparison_focus ?? '';
             field('brief_audience').value = summary.brief.audience;
             field('brief_region').value = summary.brief.region;
             field('brief_monitoring').value = summary.brief.monitoring;
+            const trial = summary.brief.trial_measurement;
+            field('trial_stores').value = trial?.stores ?? '';
+            field('trial_window').value = trial?.window ?? '';
+            field('trial_baseline').value = trial?.baseline ?? '';
+            field('brief_campaign_goal').dispatchEvent(new Event('change', { bubbles: true }));
+            if (trial) taskForm.querySelector('[data-trial-fields]').open = true;
             field('brief_confirmed').checked = false;
             field('brief_confirmed').disabled = Boolean(themeMismatch);
             review.open = true;
@@ -392,6 +533,7 @@
         }, { signal });
       }
       bindTask(scope, signal);
+      bindOverview(scope, signal);
       synchronizeTheme();
       void synchronizeSite(signal);
     }
@@ -418,6 +560,19 @@
             const message = response.headers.get('content-type')?.startsWith('text/plain')
               ? await response.text() : '操作暂时无法完成，请重试。';
             feedback.textContent = message;
+            if (form.matches('[data-task-review]') && [409, 503].includes(response.status)) {
+              const current = viewport.querySelector('[data-approval-inventory]');
+              try {
+                const detail = await fetch(url.pathname.slice(0, -'/review'.length), { signal });
+                if (detail.ok && !detail.redirected && !signal.aborted) {
+                  const next = new DOMParser().parseFromString(await detail.text(), 'text/html')
+                    .querySelector('[data-approval-inventory]');
+                  if (next && !signal.aborted) current?.replaceWith(next);
+                }
+              } catch {
+                // Keep the review form and its error message available.
+              }
+            }
             return;
           }
           location.assign(url);

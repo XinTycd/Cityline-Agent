@@ -283,7 +283,7 @@ mod tests {
 
     #[test]
     fn planned_nights_account_for_shared_crews_rain_and_overnight_boundaries() {
-        let periods = Rolling::showcase("", "2027-01-01", "2027-12-31")
+        let periods = Rolling::showcase("2027-05-01 | 1 | 预热", "2027-01-01", "2027-12-31")
             .unwrap()
             .windows("2027-01-01", "2027-12-31")
             .unwrap();

@@ -1,0 +1,60 @@
+{% extends "shell.html" %}
+{% block content %}
+<div class="page-heading">
+  <div><h1>{{ heading }}</h1><p>{{ task.summary() }}</p></div>
+  <a class="button secondary" href="/media-proposals/tasks/{{ task.id }}">返回任务详情</a>
+</div>
+<section class="panel settings-panel" aria-labelledby="route-revision-title">
+  <header class="settings-panel-header"><h2 id="route-revision-title">确认替换必选线路</h2></header>
+  {% if let Some(notice) = choices.notice %}
+  <p class="media-notice">{{ notice }}</p>
+  <a href="/media-data">打开数据中心</a>
+  {% else if choices.gaps.is_empty() %}
+  <p>当前采购清单已包含客户要求的线路。</p>
+  {% else %}
+  <dl class="report-guidance">
+    {% for gap in choices.gaps %}
+    <div><dt>{{ gap.route }}</dt><dd>有待核的采购段 · {{ gap.periods.join("、") }}</dd></div>
+    {% endfor %}
+  </dl>
+  {% if choices.candidates.is_empty() %}
+  <p class="media-notice">在整案的采购段中，没有同时具备覆盖、可售量和刊例依据的替代线路。请确认能否调整客户要求或档期。</p>
+  {% else %}
+  <p>备选须在每个采购段均有覆盖、可售和刊例记录。下表列示每段一辆的估价。确认后按原预算重新核算整案数量、排期及上下刊条件。</p>
+  <form class="settings-form" method="post" action="/media-proposals/tasks/{{ task.id }}/replacements" data-workspace-submit>
+    <div class="media-fields">
+      <label>需要替换的线路<select name="original" required>
+        <option value="">请选择</option>{% for gap in choices.gaps %}<option value="{{ gap.route }}">{{ gap.route }}</option>{% endfor %}
+      </select></label>
+      <label>替换为<select name="alternative" required>
+        <option value="">请选择</option>{% for candidate in choices.candidates %}<option value="{{ candidate.route }}">{{ candidate.route }}</option>{% endfor %}
+      </select></label>
+      <label>脱敏调整依据<input type="text" name="reason" maxlength="150" required></label>
+    </div>
+    <label class="media-confirm"><input type="checkbox" name="attested" value="1" required>客户已确认将这条必选线路替换为所选线路</label>
+    <div class="form-actions"><button type="submit">按确认结果生成新版本</button></div>
+  </form>
+  {% endif %}
+  {% endif %}
+</section>
+{% if !choices.candidates.is_empty() %}
+<section class="panel settings-panel" aria-labelledby="route-evidence-title">
+  <header class="settings-panel-header"><h2 id="route-evidence-title">备选线路的分段依据</h2></header>
+  {% for candidate in choices.candidates %}
+  <details class="detail-section">
+    <summary>{{ candidate.route }} · 各段一辆的高位估价合计 {{ candidate.quoted_wan() }} 万元</summary>
+    <dl class="report-guidance">
+      {% for dated in candidate.phases %}
+      <div>
+        <dt>{{ dated.starts }} 至 {{ dated.ends }}</dt>
+        <dd>{{ dated.grade }} · {{ dated.format }} · 可售 {{ dated.free }} 辆 · 单辆 ¥{{ dated.quote.low }}–{{ dated.quote.high }}</dd>
+        <dd>红豆 {{ dated.stock_source.file }} 第 {{ dated.stock_source.row }} 行 · 刊例 {{ dated.rate_source.file }} 第 {{ dated.rate_source.row }} 行</dd>
+        {% for cover in dated.coverage %}<dd>新云覆盖 {{ cover.circle }}{% if let Some(distance) = cover.distance %} · 最近 {{ distance }} 米{% endif %} · {{ cover.source.file }} 第 {{ cover.source.row }} 行</dd>{% endfor %}
+      </div>
+      {% endfor %}
+    </dl>
+  </details>
+  {% endfor %}
+</section>
+{% endif %}
+{% endblock %}

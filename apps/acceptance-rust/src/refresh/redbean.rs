@@ -156,6 +156,19 @@ impl Redbean {
             .is_some()
     }
 
+    pub(super) fn clear_rejected(&self, user: &str, rejected: &str) {
+        let mut entries = self
+            .authorizations
+            .lock()
+            .expect("Redbean authorization lock");
+        if entries
+            .get(user)
+            .is_some_and(|entry| entry.value == rejected)
+        {
+            entries.remove(user);
+        }
+    }
+
     pub(crate) async fn authorize(
         &self,
         user: &str,
@@ -252,7 +265,9 @@ mod tests {
             .insert("operator".into(), good);
         assert!(auth.has_token("operator"));
         assert!(!auth.has_token("another-operator"));
-        assert!(auth.clear("operator"));
+        auth.clear_rejected("operator", "previous-bearer");
+        assert!(auth.has_token("operator"));
+        auth.clear_rejected("operator", "fixture-bearer");
         assert!(!auth.has_token("operator"));
     }
 

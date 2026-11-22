@@ -1,12 +1,15 @@
 {% extends "shell.html" %}
+{% import "media-trial-fields.html" as trial_form %}
 {% block content %}
 <div class="page-heading">
   <div><h1>{{ heading }}</h1><p data-task-summary>{{ task.summary() }}</p>
     {% if let Some(previous) = task.previous_task %}<a href="/media-proposals/tasks/{{ previous }}">查看原任务</a>{% endif %}
   </div>
   <div class="action-group">
-    {% if can_read_audit %}<a class="button secondary" href="/audit?task={{ task.id }}">查看任务审计</a>{% endif %}
-    {% if task.options.rolling.is_some() %}<a class="button secondary" href="/media-proposals/tasks/{{ task.id }}/campaign" download>下载假设书</a>{% endif %}
+    {% if is_admin %}<a class="button secondary" href="/audit?task={{ task.id }}">查看任务审计</a>{% endif %}
+    <a class="button secondary" href="/media-proposals/tasks/{{ task.id }}/agent-trace" data-agent-trace-link{% if task.agent_decisions.is_empty() %} hidden{% endif %}>查看 Agent 协作</a>
+    <a class="button secondary" href="/media-proposals/tasks/{{ task.id }}/campaign" download>下载一页假设书</a>
+    <a class="button secondary" href="/media-proposals/tasks/{{ task.id }}/schedule" data-schedule-revision-link{% if task.schedule_dates().is_none() %} hidden{% endif %}>调整投放档期</a>
     <a class="button secondary" href="/media-proposals">返回提案任务</a>
   </div>
 </div>
@@ -23,12 +26,13 @@
   <fieldset class="task-steps">
     <legend class="visually-hidden">提案生成步骤</legend>
     {% let current_step = task.current_step() %}
-    {% for step in task.steps %}
+    {% for step_index in task.step_order().into_iter() %}
+    {% let step = task.steps[step_index] %}
     <input class="visually-hidden task-step-choice" type="radio" name="task-step" id="task-step-{{ loop.index }}"
-           aria-controls="task-step-detail-{{ loop.index }}" data-task-step{% if current_step == loop.index0 %} checked{% endif %}>
+           aria-controls="task-step-detail-{{ loop.index }}" data-task-step="{{ step_index }}"{% if current_step == step_index %} checked{% endif %}>
     <label class="task-step" for="task-step-{{ loop.index }}" data-state="{{ step.state.kind() }}">
       <span class="task-step-marker" aria-hidden="true">{{ loop.index }}</span>
-      <strong id="task-step-label-{{ loop.index }}">{{ labels[loop.index0] }}</strong>
+      <strong id="task-step-label-{{ loop.index }}">{{ labels[step_index] }}</strong>
       <span class="task-step-state" data-step-state>{{ step.state.label() }}</span>
     </label>
     <section class="task-step-detail" id="task-step-detail-{{ loop.index }}" aria-labelledby="task-step-label-{{ loop.index }}">
@@ -43,13 +47,13 @@
   {% if task.state.active() %}<noscript><a href="/media-proposals/tasks/{{ task.id }}">刷新进度</a></noscript>{% endif %}
 </section>
 {% if task.state.active() && task.needs_platform_login() %}
-<dialog class="platform-dialog" data-platform-dialog aria-labelledby="platform-login-title">
+<dialog class="platform-dialog" data-platform-dialog="{{ task.login.phase }}" aria-labelledby="platform-login-title">
   {% if task.options.proof_only %}
   <h2 id="platform-login-title">认证新云平台</h2>
-  <p>请在 Edge 完成新云平台认证。工作台会按已锁定的 A／B 清单补充线路图与触达证据。</p>
+  <p>系统正在核验新云授权。若 Edge 打开登录页，请完成认证。工作台按已锁定的 A／B 清单补充线路图与触达证据。</p>
   {% else %}
   <h2 id="platform-login-title">认证数据平台</h2>
-  <p>请在 Edge 打开的新云平台完成认证。工作台优先校验红豆临时令牌。需要重新认证时，Edge 会打开红豆平台登录页。</p>
+  <p>系统正在分别核验新云和红豆授权。若 Edge 打开登录页，请在对应页面完成认证。</p>
   {% endif %}
   <ul aria-live="polite">
     <li><span data-platform-check="newcloud">{% if task.login.newcloud %}✓ 已认证{% else %}待认证{% endif %}</span> 新云平台</li>
@@ -62,41 +66,127 @@
 {% endif %}
 <section class="panel settings-panel" aria-labelledby="task-delivery-title" data-task-delivery{% if task.state.active() %} hidden{% endif %}>
   <header class="settings-panel-header"><h2 id="task-delivery-title">任务结果与操作</h2></header>
-  <div class="task-result-actions" data-task-ready{% if !task.state.done() %} hidden{% endif %}>
+  {% let elapsed = task.generation_time() %}
+  <p class="report-caption" data-generation-time{% if elapsed.is_none() %} hidden{% endif %}>{% if let Some(time) = elapsed %}本版本生成耗时 {{ time }}{% endif %}</p>
+  <p class="media-notice" data-platform-outcome{% if !task.login.interrupted() %} hidden{% endif %}>
+    <strong>获取平台数据中断</strong>。
+    <span>新云平台 <span data-auth-result="newcloud">{% if task.login.newcloud %}已确认{% else %}未确认{% endif %}</span>。</span>
+    {% if !task.options.proof_only %}<span>红豆平台 <span data-auth-result="redbean">{% if task.login.redbean %}已确认{% else %}未确认{% endif %}</span>。</span>{% endif %}
+    请查看数据核验记录，可用原条件重新获取数据或按同档期快照继续。
+  </p>
+  <div class="task-result-actions" data-task-ready{% if !task.state.report_visible() %} hidden{% endif %}>
     <div class="result-header section-toolbar">
-      <span class="badge">{{ task.review.label() }}</span>
-      <div class="action-group">
-        <a class="button" href="/media-proposals/tasks/{{ task.id }}/report?preview=1" target="_blank" rel="noopener">预览独立 HTML</a>
-        <a class="button secondary" href="/media-proposals/tasks/{{ task.id }}/report" download>导出当前方案 HTML</a>
+      <span class="badge">
+        {% if task.is_demo() %}仅供演示
+        {% else if task.legacy_pending_review() || (task.review.key() == "approved" && task.confirmed_delivery().is_none()) %}历史报告 · 待复核证据
+        {% else if task.approval_inventory_issue.is_some() %}库存复核待处理
+        {% else %}{{ task.review.label() }}{% if let Some(choice) = task.confirmed_delivery() %} · 采用方案 {{ choice.code() }}{% endif %}
+        {% endif %}
+      </span>
+      <div class="action-group" data-task-report-links{% if !task.can_publish_report() %} hidden{% endif %}>
+        <a class="button" href="/media-proposals/tasks/{{ task.id }}/report?preview=1" target="_blank" rel="noopener">打开独立 HTML</a>
+        {% if task.is_demo() %}
+        <a class="button secondary" href="/media-proposals/tasks/{{ task.id }}/report" download>导出演示 HTML</a>
+        {% else %}
+        <a class="button secondary" href="/media-proposals/tasks/{{ task.id }}/report?delivery=1" download>导出已确认方案 HTML</a>
+        {% endif %}
       </div>
     </div>
-    {% if task.review.pending() %}
-      <form class="inline-form detail-section" method="post" action="/media-proposals/tasks/{{ task.id }}/review" data-workspace-submit>
+    <div data-approval-inventory{% if task.approval_inventory_issue.is_none() %} hidden{% endif %}>
+      {% if let Some(issue) = task.approval_inventory_issue %}
+      <p class="media-notice"><strong>库存复核待处理</strong>{% if let Some(check) = task.approval_inventory_review %} · 方案 {{ check.variant.code() }}{% endif %}。{{ issue }}{% if is_admin %} <a href="/settings?tab=platforms">查看平台授权</a>{% endif %}</p>
+      {% if let Some(check) = task.approval_inventory_review %}
+      {% if !check.issues.is_empty() %}
+      <div class="task-rail" role="region" aria-label="库存差异" tabindex="0">
+        <table class="work-table">
+          <caption class="visually-hidden">方案 {{ check.variant.code() }} 库存复核明细</caption>
+          <thead><tr><th scope="col">档期</th><th scope="col">资源</th><th scope="col">计划采购</th><th scope="col">核验可售</th><th scope="col">复核结果</th></tr></thead>
+          <tbody>
+            {% for item in check.issues %}
+            <tr>
+              <td>{{ item.starts }} 至 {{ item.ends }}</td>
+              <th scope="row">{{ item.name }}{% if !item.code.is_empty() %} · {{ item.code }}{% endif %}{% if !item.specification.is_empty() %}<br><small>{{ item.specification }}</small>{% endif %}</th>
+              <td>{{ item.required }} {{ item.unit() }}</td>
+              <td>{% if let Some(count) = item.available %}{{ count }} {{ item.unit() }}{% else %}待核实{% endif %}</td>
+              <td>{{ item.reason() }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% endif %}
+      {% endif %}
+      {% endif %}
+    </div>
+    {% if is_admin && task.review.pending() && !task.is_demo() %}
+      <form class="inline-form detail-section" method="post" action="/media-proposals/tasks/{{ task.id }}/review" data-workspace-submit data-task-review{% if !task.ready_for_review() %} hidden{% endif %}>
+        <p>提交确认时，工作台会使用红豆授权复核所选方案各阶段的可售库存。</p>
+        <label>采用方案<select name="variant" required><option value="">请选择</option><option value="A">方案 A</option><option value="B">方案 B</option></select></label>
         <label>审核意见<input type="text" name="note" maxlength="300" placeholder="退回时需填写原因"></label>
+        <label class="media-confirm" data-budget-confirmation{% if !task.budget_confirmation_required() %} hidden{% endif %}><input type="checkbox" name="accept_budget_gap" value="1">所选方案高位报价超出 {{ crate::media::budget_band_label(task.budget()) }}参考区间时，客户已同意，原因见审核意见</label>
         <div class="action-group">
           <button type="submit" name="decision" value="approved">确认提案</button>
-          <button type="submit" name="decision" value="returned" class="secondary">退回修改</button>
+          <button type="submit" name="decision" value="returned" class="secondary" formnovalidate>退回修改</button>
         </div>
       </form>
-    {% else if !task.review_note.is_empty() %}
+    {% else if !task.is_demo() && !task.review_note.is_empty() %}
       <p>审核意见 · {{ task.review_note }}</p>
     {% endif %}
   </div>
-  <div class="action-group" data-task-blocked{% if task.state.active() || task.state.done() || !task.has_alternative %} hidden{% endif %}>
-    <a class="button secondary" data-task-alternative href="/media-proposals/tasks/{{ task.id }}/report?preview=1" target="_blank" rel="noopener"{% if !task.has_alternative %} hidden{% endif %}>预览待确认备选草案</a>
+  <p class="media-notice" data-task-blocked{% if task.state.active() || task.can_publish_report() %} hidden{% endif %}>
+    正式报告将在平台数据齐备并通过人工确认后开放。 <a data-publication-checklist href="/media-proposals/tasks/{{ task.id }}/evidence?scope=publication"{% if !task.can_refresh_evidence() %} hidden{% endif %}>查看正式报告核验</a>
+  </p>
+  <div class="action-group" data-route-replacement{% if !task.can_replace_route() %} hidden{% endif %}>
+    <a class="button secondary" href="/media-proposals/tasks/{{ task.id }}/replacements">复核必选线路与备选</a>
   </div>
+  <form class="inline-form detail-section" action="/media-proposals/tasks/{{ task.id }}/confirm-goal" method="post" data-workspace-submit data-goal-confirmation{% if !task.can_confirm_goal() %} hidden{% endif %}>
+    <label class="field-compact">确认客户主目标<select name="goal" required><option value="">请选择</option><option value="到店">到店</option><option value="认知">认知</option><option value="促销">促销</option><option value="拉新">拉新</option></select></label>
+    <div class="action-group"><button class="secondary" type="submit">确认目标并生成新版本</button></div>
+  </form>
+  {% if !task.is_demo() %}
+  {% let campaign = task.campaign() %}
+  {% let missing = campaign.missing() %}
+  <details class="detail-section">
+    <summary>修订客户假设书</summary>
+    {% if !missing.is_empty() %}<p>待补齐 · {{ missing.join("、") }}。</p>{% endif %}
+    <p>修订保存为新版本。已锁定的档期、媒体与库存继续沿用。变更查询地标时请新建提案。</p>
+    <form class="settings-form" action="/media-proposals/tasks/{{ task.id }}/campaign" method="post" data-workspace-submit>
+      <div class="media-fields">
+        <label>脱敏客户类型与规模<input name="customer_profile" value="{{ campaign.brief.customer_profile }}" maxlength="150" required></label>
+        <label>生意目标<input name="objective" value="{{ campaign.brief.objective }}" maxlength="150" required></label>
+        <label>Campaign 主目标<select name="goal" required>
+          <option value="">请选择</option>
+          <option value="到店"{% if campaign.brief.campaign_goal == "到店" %} selected{% endif %}>到店</option>
+          <option value="认知"{% if campaign.brief.campaign_goal == "认知" %} selected{% endif %}>认知</option>
+          <option value="促销"{% if campaign.brief.campaign_goal == "促销" %} selected{% endif %}>促销</option>
+          <option value="拉新"{% if campaign.brief.campaign_goal == "拉新" %} selected{% endif %}>拉新</option>
+        </select></label>
+        <label>目标人群<input name="audience" value="{{ campaign.brief.audience }}" maxlength="150" required></label>
+        <label>活动区域<input name="region" value="{{ campaign.brief.region }}" maxlength="150"{% if campaign.target_centers.is_empty() %} required{% endif %}></label>
+        <label>成功衡量与监测<input name="monitoring" value="{{ campaign.brief.monitoring }}" maxlength="150"></label>
+      </div>
+      {% if let Some(trial) = campaign.brief.trial_measurement %}
+      {% call trial_form::inputs(trial.stores, trial.window, trial.baseline) %}{% endcall %}
+      {% else %}
+      {% call trial_form::inputs("", "", "") %}{% endcall %}
+      {% endif %}
+      <label class="media-confirm"><input type="checkbox" name="attested" value="1" required>已核对七项内容，客户及商务信息已脱敏</label>
+      <div class="action-group"><button class="secondary" type="submit">保存假设书并生成新版本</button></div>
+    </form>
+  </details>
+  {% endif %}
   <form class="inline-form detail-section" action="/media-proposals/tasks/{{ task.id }}/rerun" method="post" data-workspace-submit>
     <label class="field-compact">投放预算量级（万元）<input type="number" name="budget" value="{{ task.budget() }}" min="100" max="500" step="1"{% if task.fixed_showcase_budget() %} readonly{% else %} list="task-budgets"{% endif %} required></label>
     {% if !task.fixed_showcase_budget() %}<datalist id="task-budgets">{% for budget in budgets %}<option value="{{ budget }}">{% endfor %}</datalist>{% endif %}
-    <div class="action-group"><button class="secondary" type="submit">{% if task.options.demo == Some(1) %}重新生成提案{% else %}重新取数并生成{% endif %}</button></div>
+    <div class="action-group"><button class="secondary" type="submit">{% if task.options.demo == Some(1) %}重新生成提案{% else %}重新获取数据并生成{% endif %}</button></div>
   </form>
   {% if task.options.demo != Some(1) %}
   <details class="detail-section" data-task-evaluation{% if !task.can_evaluate_budget() %} hidden{% endif %}>
-    <summary>评审现场预算重算</summary>
+    <summary>预算重算</summary>
     <p>沿用当前版本的业务条件和库存快照，按预算重算 A／B。新报告会对照当前版本。</p>
     <form class="inline-form" action="/media-proposals/tasks/{{ task.id }}/rerun" method="post" data-workspace-submit>
       <input name="evaluation" type="hidden" value="1">
-      <label class="field-compact">现场预算<select name="budget">{% for amount in budgets.iter().copied() %}<option value="{{ amount }}"{% if amount == task.budget() %} selected{% endif %}>{{ amount }} 万元</option>{% endfor %}</select></label>
+      <label class="field-compact">重算预算<select name="budget">{% for amount in budgets.iter().copied() %}<option value="{{ amount }}"{% if amount == task.budget() %} selected{% endif %}>{{ amount }} 万元</option>{% endfor %}</select></label>
       <div class="action-group"><button class="secondary" type="submit">生成对照版本</button></div>
     </form>
   </details>
@@ -118,11 +208,11 @@
     <form class="inline-form" method="post" action="/media-proposals/tasks/{{ task.id }}/rerun" data-workspace-submit>
       <input type="hidden" name="budget" value="{{ task.budget() }}">
       <div class="action-group">
-        <button class="secondary" type="submit" name="same_inventory" value="1" data-same-inventory{% if !task.can_reuse_portfolio() %} hidden{% endif %}>沿用采购清单复核补证</button>
+        <button class="secondary" type="submit" name="same_inventory" value="1" data-same-inventory{% if !task.can_review_same_inventory() %} hidden{% endif %}>{% if task.legacy_pending_review() %}沿用原快照复核{% else %}沿用采购清单复核补证{% endif %}</button>
         <button class="secondary" type="submit" name="local_snapshot" value="1">用最新同档期快照生成</button>
       </div>
     </form>
-    <p>也可在<a href="/media-data">数据中心</a>导入新的同档期、同媒体库存，按原预算核算。</p>
+    <p>也可在<a href="/media-data?source=local">数据中心的本地数据</a>导入新的同档期、同媒体库存，按原预算核算。</p>
   </details>
   {% endif %}
   {% if task.options.rolling.is_some() %}
@@ -135,11 +225,13 @@
     </form>
   </details>
   {% endif %}
+  {% if is_admin %}
   <details class="detail-section"><summary>删除任务</summary>
     <form method="post" action="/media-proposals/tasks/{{ task.id }}/delete" data-workspace-submit>
       <p>删除后该任务将移出列表，并清除已保存的报告。</p>
       <div class="form-actions"><button class="danger" type="submit">确认删除</button></div>
     </form>
   </details>
+  {% endif %}
 </section>
 {% endblock %}

@@ -9,7 +9,7 @@ use std::{
 use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier, password_hash::SaltString};
 use askama::Template;
 use axum::{
-    Form, Router,
+    Extension, Form, Router,
     extract::{DefaultBodyLimit, Query, State, rejection::FormRejection},
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Redirect, Response},
@@ -19,7 +19,10 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
-    audit, profile, settings,
+    audit, profile,
+    refresh::Refresh,
+    settings,
+    settings::Brand,
     store::Store,
     web::{WebError, database, render},
 };
@@ -112,16 +115,18 @@ pub(crate) struct User {
     pub(crate) admin: bool,
     pub(crate) method: LoginMode,
     pub(crate) avatar: Option<reqwest::Url>,
+    pub(crate) platform_scope: Uuid,
 }
 
 impl User {
-    fn demo() -> Self {
+    fn demo(platform_scope: Uuid) -> Self {
         Self {
             display: "演示账号".into(),
             identifier: "本机演示".into(),
             admin: true,
             method: LoginMode::Disabled,
             avatar: None,
+            platform_scope,
         }
     }
 
@@ -232,7 +237,7 @@ impl Auth {
     pub(crate) fn user(&self, headers: &HeaderMap) -> Option<User> {
         let state = self.state.lock().expect("auth lock");
         if !state.config.enabled() {
-            return (!profile::is_signed_out(headers)).then(User::demo);
+            return (!profile::is_signed_out(headers)).then(|| User::demo(state.version));
         }
         let token = read_cookie(headers, SESSION)?;
         state
@@ -326,7 +331,7 @@ impl Auth {
         Ok(new_mode)
     }
 
-    fn reserve_session(&self, user: User, version: Uuid) -> Result<(Uuid, u64), WebError> {
+    fn reserve_session(&self, mut user: User, version: Uuid) -> Result<(Uuid, u64), WebError> {
         let mut state = self.state.lock().expect("auth lock");
         if state.version != version {
             return Err(BAD_LOGIN);
@@ -338,6 +343,7 @@ impl Auth {
             return Err((StatusCode::TOO_MANY_REQUESTS, "工作台会话数已满。"));
         }
         let token = Uuid::new_v4();
+        user.platform_scope = token;
         state.sessions.insert(
             token,
             Session {
@@ -400,22 +406,58 @@ fn read_cookie(headers: &HeaderMap, name: &str) -> Option<Uuid> {
 struct SignIn {
     mode: LoginMode,
     notice: Option<&'static str>,
+    brand: Brand,
 }
 
 #[derive(Default, Deserialize)]
 struct SignInQuery {
     failed: Option<u8>,
+    provider_failed: Option<u8>,
+    expired: Option<u8>,
 }
 
 async fn sign_in_page(State(auth): State<Auth>, Query(query): Query<SignInQuery>) -> Response {
     let config = auth.config();
+    let brand = Brand::read(&auth.store).await.unwrap_or_default();
     if !config.enabled() {
-        return profile::sign_in_page().await;
+        return profile::sign_in_page(brand);
     }
+    let notice = if query.provider_failed == Some(1) {
+        Some("外部认证服务暂不可用。可使用本地管理员登录。")
+    } else if query.expired == Some(1) {
+        Some("外部认证已超时，请重新发起登录，或使用本地管理员登录。")
+    } else {
+        (query.failed == Some(1)).then_some(BAD_LOGIN.1)
+    };
     render(SignIn {
         mode: config.mode,
-        notice: (query.failed == Some(1)).then_some(BAD_LOGIN.1),
+        notice,
+        brand,
     })
+}
+
+async fn external_start(
+    State(auth): State<Auth>,
+    headers: HeaderMap,
+) -> Result<Response, WebError> {
+    match provider::start(State(auth.clone()), headers).await {
+        Ok(response) => Ok(response),
+        Err((status, _)) => {
+            audit::record(
+                &auth.store,
+                "登录",
+                "外部认证暂不可用",
+                None,
+                format!(
+                    "{} 认证入口返回 HTTP {}。",
+                    auth.config().mode.key(),
+                    status.as_u16()
+                ),
+            )
+            .await?;
+            Ok(Redirect::to("/demo/sign-in?provider_failed=1").into_response())
+        }
+    }
 }
 
 #[derive(Deserialize, Default)]
@@ -482,6 +524,7 @@ async fn sign_in(
             admin: true,
             method: LoginMode::Local,
             avatar: None,
+            platform_scope: Uuid::nil(),
         },
         version,
         "登录成功",
@@ -489,7 +532,13 @@ async fn sign_in(
     .await
 }
 
-async fn sign_out(State(auth): State<Auth>, headers: HeaderMap) -> Result<Response, WebError> {
+async fn sign_out(
+    State(auth): State<Auth>,
+    Extension(refresh): Extension<Refresh>,
+    Extension(user): Extension<User>,
+    headers: HeaderMap,
+) -> Result<Response, WebError> {
+    refresh.clear_newcloud(user.platform_scope);
     if !auth.config().enabled() {
         return Ok(profile::sign_out().await);
     }
@@ -517,7 +566,7 @@ pub(crate) fn router(auth: Auth) -> Router {
                 .layer(DefaultBodyLimit::max(2048)),
         )
         .route("/demo/sign-out", post(sign_out))
-        .route("/auth/start", get(provider::start))
+        .route("/auth/start", get(external_start))
         .route("/auth/callback", get(provider::callback))
         .with_state(auth)
 }

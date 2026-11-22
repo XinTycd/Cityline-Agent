@@ -1,0 +1,23 @@
+<div class="report-glance" aria-label="两案关键数据">
+  {% for variant in variants %}
+  <article class="report-glance-card">
+    <h3>方案 {{ variant.code }} · {{ variant.name }}</h3>
+    <dl>
+      <div class="report-glance-quote">
+        <dt>{% if variant.available %}刊例估算{% else %}已核资源刊例估算{% endif %}</dt>
+        <dd class="metric-value">{% if variant.total.high > 0 %}{{ crate::media::wan(variant.total.low) }}–{{ crate::media::wan(variant.total.high) }} <small class="metric-unit">万元</small>{% else %}待核对{% endif %}</dd>
+      </div>
+      {% for metric in variant.metrics %}
+      {% if metric.name == "组合曝光" %}
+      <div class="report-glance-reach">
+        <dt>{{ metric.name }}</dt>
+        <dd>{% if metric.known %}{{ metric.total }} <small>人次</small>{% else %}{{ metric.status }}{% endif %}</dd>
+        {% if metric.known %}<dd class="report-caption">{{ metric.status }}{% if metric.baseline_months > 0 %} · 含 5 月基准{% endif %}</dd>{% endif %}
+      </div>
+      {% endif %}
+      {% endfor %}
+    </dl>
+    <p class="report-glance-scale"><strong>{{ variant.bus_lines }}</strong> 条公交线路 · <strong>{{ variant.buses }}</strong> {% if variant.periods.len() > 1 %}辆次{% else %}辆{% endif %} · <strong>{{ variant.exits }}</strong> {% if variant.periods.len() > 1 %}地铁处次{% else %}地铁点位{% endif %} · <strong>{{ variant.circles }}</strong> 个已核目标圈{% if let Some(days) = variant.core_bus_days() %}{% if variant.buses > 0 %} · 核心圈 <strong>{{ days }}</strong> 公交车日{% endif %}{% endif %}</p>
+  </article>
+  {% endfor %}
+</div>

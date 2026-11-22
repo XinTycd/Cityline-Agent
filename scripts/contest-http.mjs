@@ -23,7 +23,6 @@ export const cloudOrigin = configuredOrigin('CITYLINE_NEWCLOUD_ORIGIN');
 export const redOrigin = configuredOrigin('CITYLINE_REDBEAN_ORIGIN');
 export const cloudPath = (key) => configuredPath('NEWCLOUD', key);
 export const redPath = (key) => configuredPath('REDBEAN', key);
-export const sampleMonth = '202305';
 const maxBytes = 2 * 1024 * 1024;
 const xlsxMime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const contestCenters = new Map(JSON.parse(process.env.CITYLINE_NEWCLOUD_CENTER_COORDINATES || '[]')
@@ -41,6 +40,15 @@ export function routeKey(value) {
   return String(value ?? '').normalize('NFKC').replace(/\s/gu, '').replace(/(\d)路$/u, '$1').toLowerCase();
 }
 
+function rejected(status) {
+  return Object.assign(new Error('Contest service returned HTTP ' + status), { status });
+}
+
+export function sessionRejected(error) {
+  return error?.status === 401 || error?.status === 403
+    || (error?.status >= 300 && error?.status < 400);
+}
+
 async function request(origin, path, { headers, query, json, form, referer, excel = false }) {
   const url = new URL(path, origin);
   if (url.origin !== origin) throw new Error('Unexpected contest endpoint origin');
@@ -55,7 +63,7 @@ async function request(origin, path, { headers, query, json, form, referer, exce
     options.body = json ? JSON.stringify(json) : new URLSearchParams(form);
   }
   const res = await fetch(url, options);
-  if (!res.ok) throw new Error('Contest service returned HTTP ' + res.status);
+  if (!res.ok) throw rejected(res.status);
   if (Number(res.headers.get('content-length')) > maxBytes) throw new Error('Contest response exceeds size limit');
   if (!res.body) throw new Error('Empty contest response');
   const blocks = [];
@@ -70,10 +78,12 @@ async function request(origin, path, { headers, query, json, form, referer, exce
     if (bytes.length < 4 || bytes.readUInt32LE(0) !== 0x04034b50) throw new Error('Official Excel export was not returned');
     return bytes;
   }
-  const parsed = JSON.parse(bytes.toString('utf8').replace(/^\ufeff/u, ''));
+  const source = bytes.toString('utf8').replace(/^\ufeff/u, '');
+  if (source.trimStart().startsWith('<')) throw rejected(401);
+  const parsed = JSON.parse(source);
   if (!Array.isArray(parsed) && ![0, 200, '0000', '0', '200'].includes(parsed?.code)) {
     if ([401, 403].includes(Number(parsed?.code))) {
-      throw new Error('Contest service returned HTTP ' + Number(parsed.code));
+      throw rejected(Number(parsed.code));
     }
     throw new Error('Contest service rejected the request');
   }
@@ -119,13 +129,19 @@ export function normalizePath(data) {
   return line.filter((point, index) => !index || point[0] !== line[index - 1][0] || point[1] !== line[index - 1][1]);
 }
 
+export function dailyCount(value) {
+  if (typeof value !== 'number'
+    && (typeof value !== 'string' || !/^\d+(?:\.\d+)?$/u.test(value.trim()))) return null;
+  const count = Number(value);
+  return Number.isFinite(count) && count >= 1 && count <= 100_000_000 ? Math.round(count) : null;
+}
+
 export function verifiedReach(data, media) {
   if (!Array.isArray(data)) return null;
   const unit = media === 'bus' ? '人次/辆/天' : '人次/点位/天';
   const accepted = data.filter((entry) => entry?.type === 'coverPeoplesPVAccurate'
-    && String(entry.unit ?? '').normalize('NFKC').trim() === unit && Number.isFinite(Number(entry.time1))
-    && Number(entry.time1) > 0 && Number(entry.time1) <= 100_000_000);
-  return accepted.length === 1 ? Math.round(Number(accepted[0].time1)) : null;
+    && typeof entry.unit === 'string' && entry.unit.normalize('NFKC').trim() === unit);
+  return accepted.length === 1 ? dailyCount(accepted[0].time1) : null;
 }
 
 export function cloudClient(cookie) {
@@ -191,12 +207,19 @@ export function cloudClient(cookie) {
       const results = await Promise.all(metroGroups.map(readLabels));
       return Array.from(new Map(results.flat().map((row) => [row.id, row])).values());
     },
-    reach(labelId) {
+    async reach(labelId, month) {
       if (!/^[\w-]{1,80}$/u.test(String(labelId))) throw new Error('Invalid Newcloud label');
-      return read(cloudPath('REACH'), { referer: cloudPath('REACH_PAGE'), form: {
-        queryType: '1', indicatorType: 'visitorsFlowrateAndcrowdSpeed', dataMonth: sampleMonth,
+      if (!/^2023-(0[1-9]|1[0-2])$/u.test(month)) throw new Error('Invalid Newcloud observation month');
+      const dataMonth = month.replace('-', '');
+      const result = await read(cloudPath('REACH'), { referer: cloudPath('REACH_PAGE'), form: {
+        queryType: '1', indicatorType: 'visitorsFlowrateAndcrowdSpeed', dataMonth,
         labelIds: labelId, gridIds: '', extOptions: JSON.stringify({ gridType: '500', underground: '0' }),
       } });
+      if (Array.isArray(result) && result.some(row => row?.type === 'coverPeoplesPVAccurate'
+        && row.dataMonth != null && ![month, dataMonth].includes(String(row.dataMonth)))) {
+        throw new Error('Newcloud returned an unexpected observation month');
+      }
+      return result;
     },
   };
 }
@@ -251,7 +274,7 @@ export function redClient(token, tenant = '1') {
     try {
       entries = await read('DICTIONARY');
     } catch (error) {
-      if (/returned HTTP 401\b/u.test(error?.message ?? '')) throw error;
+      if (sessionRejected(error)) throw error;
       throw new Error('Redbean media-level dictionary is unavailable');
     }
     if (!Array.isArray(entries)) throw new Error('Redbean returned an incompatible media-level dictionary');
@@ -304,27 +327,27 @@ export function redClient(token, tenant = '1') {
     if (new Set(ids).size !== ids.length) throw new Error('Redbean inventory contains duplicate page rows');
     return rows;
   }
+  async function stockRows(media, dates, filter = {}, requiredRoutes = []) {
+    const rows = await inventory(media, dates, filter);
+    const found = new Set(rows.map(([name]) => routeKey(name)));
+    for (const route of requiredRoutes) {
+      const key = routeKey(route);
+      if (found.has(key)) continue;
+      const scoped = await inventory('bus', dates, { lineName: key });
+      rows.push(...scoped.filter(([name]) => routeKey(name) === key));
+      found.add(key);
+    }
+    await resolveLevels(rows, media);
+    return rows;
+  }
   return {
     authorize: (dates, media) => Promise.all((media === 'both' ? ['bus', 'metro'] : [media])
       .map((kind) => page(kind, dates, {}, 1, 1))),
-    async bus(dates, requiredRoutes = []) {
-      const rows = await inventory('bus', dates);
-      const found = new Set(rows.map(([name]) => routeKey(name)));
-      for (const route of requiredRoutes) {
-        const key = routeKey(route);
-        if (found.has(key)) continue;
-        const scoped = await inventory('bus', dates, { lineName: key });
-        rows.push(...scoped.filter(([name]) => routeKey(name) === key));
-        found.add(key);
-      }
-      await resolveLevels(rows, 'bus');
-      return inventoryCsv(rows, 'bus');
-    },
-    async metro(dates, keyword) {
-      const rows = await inventory('metro', dates, keyword ? { keyword } : {});
-      await resolveLevels(rows, 'metro');
-      return inventoryCsv(rows, 'metro');
-    },
+    stockRows,
+    bus: async (dates, requiredRoutes = []) =>
+      inventoryCsv(await stockRows('bus', dates, {}, requiredRoutes), 'bus'),
+    metro: async (dates, keyword) =>
+      inventoryCsv(await stockRows('metro', dates, keyword ? { keyword } : {}), 'metro'),
     busExport: (dates) => read('BUS_EXPORT', dates, true),
     metroExport: (dates) => read('METRO_EXPORT', dates, true),
     specs: () => read('SPECS', {}, true),

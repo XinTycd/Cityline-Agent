@@ -22,7 +22,13 @@ use crate::{
 };
 
 const MAX_LOGO: usize = 192 * 1024;
-pub(crate) const DEFAULT_DESCRIPTION: &str = "户外媒体Agent工作台";
+pub(crate) const DEFAULT_DESCRIPTION: &str = "户外媒体 Agent 提案工作台";
+pub(crate) const LEGACY_DESCRIPTIONS: &[&str] = &[
+    "户外媒体提案",
+    "户外媒体Agent工作台",
+    "户外媒体 Agent 工作台",
+    "户外媒体提案工作台",
+];
 
 #[derive(Clone, Deserialize, Serialize)]
 pub(crate) struct Brand {
@@ -94,7 +100,12 @@ pub(crate) struct Settings {
 
 impl Settings {
     pub(crate) fn initialize(store: Store, port: u16) -> Result<Self, Box<dyn std::error::Error>> {
-        let brand = read(&store.connect()?, "brand")?;
+        let db = store.connect()?;
+        let mut brand: Brand = read(&db, "brand")?;
+        if LEGACY_DESCRIPTIONS.contains(&brand.description.trim()) {
+            brand.description = DEFAULT_DESCRIPTION.into();
+            write(&db, "brand", &brand)?;
+        }
         let auth = Auth::initialize(store.clone(), port)?;
         Ok(Self {
             store,

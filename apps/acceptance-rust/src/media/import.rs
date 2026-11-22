@@ -307,6 +307,24 @@ pub(super) struct MetroSpec {
     grade: String,
     format: String,
     evidence: MetroEvidence,
+    exit_bd09: Option<super::visuals::Coordinate>,
+}
+
+impl MetroSpec {
+    pub(super) fn exit_shape(
+        &self,
+        inventory: &Inventory,
+        from_platform: bool,
+    ) -> Option<super::visuals::Shape> {
+        let mut shape = super::visuals::Shape::metro_exit(
+            inventory.code.clone(),
+            self.exit_bd09?,
+            format!("红豆地铁出口规格 · {} · BD-09", inventory.code),
+            self.evidence.source.clone(),
+        );
+        shape.platform_verified = from_platform;
+        Some(shape)
+    }
 }
 
 fn parse_area(value: &str) -> Option<u32> {
@@ -340,6 +358,8 @@ pub(super) fn metro_specs(table: &Table) -> Result<BTreeMap<String, MetroSpec>, 
     let line = column(&headers, &["所属线路"]);
     let status = column(&headers, &["状态"]);
     let publication = column(&headers, &["可上下刊"]);
+    let coordinates = column(&headers, &["出口坐标", "坐标"]);
+    let coordinate_system = column(&headers, &["出口坐标系", "坐标系"]);
     let mut specs = BTreeMap::new();
     for (index, row) in table.rows.iter().enumerate().skip(start + 1) {
         let id = field(row, code);
@@ -366,12 +386,20 @@ pub(super) fn metro_specs(table: &Table) -> Result<BTreeMap<String, MetroSpec>, 
         ]
         .iter()
         .any(|term| remark.contains(term));
+        let exit_bd09 = if field(row, coordinate_system).eq_ignore_ascii_case("BD-09") {
+            field(row, coordinates)
+                .split_once([',', '，'])
+                .and_then(|(lng, lat)| coordinate(lng, lat))
+        } else {
+            None
+        };
         let spec = MetroSpec {
             station: cols.station_name(row, "").into(),
             name,
             area: parse_area(field(row, area)),
             grade: field(row, cols.grade).into(),
             format: field(row, cols.format).into(),
+            exit_bd09,
             evidence: MetroEvidence {
                 source: table.source(index),
                 remark: remark.into(),
@@ -702,6 +730,53 @@ fn coordinate(lng: &str, lat: &str) -> Option<super::visuals::Coordinate> {
     super::visuals::Coordinate::shanghai(number(lng)?, number(lat)?)
 }
 
+pub(super) fn metro_exit_points(table: &Table) -> Result<Vec<super::visuals::Shape>, &'static str> {
+    use super::visuals::{Coordinate, Shape, valid_reference, valid_resource};
+
+    let assets = &["点位编号或名称"];
+    let longitude = &["经度"];
+    let latitude = &["纬度"];
+    let system = &["坐标系"];
+    let reference = &["来源记录"];
+    let (start, headers) = table.header(&[assets, longitude, latitude, system, reference])?;
+    let col = |aliases: &[&str]| column(&headers, aliases);
+    let mut result = Vec::new();
+    for (index, row) in table.rows.iter().enumerate().skip(start + 1) {
+        let lng = field(row, col(longitude));
+        let lat = field(row, col(latitude));
+        let source_ref = field(row, col(reference));
+        if lng.is_empty() && lat.is_empty() && source_ref.is_empty() {
+            continue;
+        }
+        let asset = field(row, col(assets));
+        if !valid_resource(asset) || !valid_reference(source_ref) {
+            return Err("出口坐标须有红豆点位编号或完整名称，以及可查的具体出口来源。");
+        }
+        if !field(row, col(system)).eq_ignore_ascii_case("BD-09") {
+            return Err("出口坐标表仅接受 BD-09 百度地图坐标系，请核对原始来源。");
+        }
+        let point = lng
+            .parse()
+            .ok()
+            .zip(lat.parse().ok())
+            .and_then(|(lng, lat)| Coordinate::shanghai(lng, lat))
+            .ok_or("出口需填写上海范围内的经度和纬度，请核对两列及原始坐标。")?;
+        result.push(Shape::metro_exit(
+            asset.into(),
+            point,
+            format!("{source_ref} · BD-09"),
+            table.source(index),
+        ));
+    }
+    if result.is_empty() {
+        return Err("出口坐标表没有可用记录。");
+    }
+    if result.len() > 800 {
+        return Err("出口坐标表最多可提交 800 个点位。");
+    }
+    Ok(result)
+}
+
 pub(super) fn reach(table: &Table) -> Result<Vec<super::visuals::Reach>, &'static str> {
     let kinds = &["媒体类型"] as &[&str];
     let assets = &["资源编号或线路"];
@@ -730,14 +805,23 @@ pub(super) fn reach(table: &Table) -> Result<Vec<super::visuals::Reach>, &'stati
             .and_then(|month| month.parse::<u32>().ok())
             .filter(|month| (1..=12).contains(month))
             .ok_or("触达统计月份须为 2023-MM。")?;
-        let daily = field(row, col(counts))
+        let resource = field(row, col(assets));
+        let amount = field(row, col(counts));
+        let reference = field(row, col(references));
+        if amount.is_empty()
+            && reference.is_empty()
+            && field(row, col(basis)).is_empty()
+            && unit_verified
+            && super::visuals::valid_resource(resource)
+        {
+            continue;
+        }
+        let daily = amount
             .replace([',', '，'], "")
             .parse::<u32>()
             .ok()
             .filter(|daily| *daily > 0 && *daily <= 100_000_000)
             .ok_or("每日触达须是原系统提供的正整数人次。")?;
-        let reference = field(row, col(references));
-        let resource = field(row, col(assets));
         if !super::visuals::valid_reference(reference) || !super::visuals::valid_resource(resource)
         {
             return Err("触达记录需要有效的资源标识和新云查询依据。");
@@ -756,6 +840,7 @@ pub(super) fn reach(table: &Table) -> Result<Vec<super::visuals::Reach>, &'stati
             source: table.source(index),
             baseline,
             unit_verified,
+            platform_verified: false,
         });
     }
     if result.is_empty() {

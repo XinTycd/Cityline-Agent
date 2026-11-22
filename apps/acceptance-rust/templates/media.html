@@ -1,4 +1,5 @@
 {% extends "shell.html" %}
+{% import "media-trial-fields.html" as trial_form %}
 {% block content %}
 <div class="page-heading">
   <div><h1>{{ heading }}</h1><p>食品饮料行业 · 上海商圈到店提案</p></div>
@@ -6,6 +7,8 @@
     <input type="hidden" name="demo" value="1">
     <input type="hidden" name="budget" value="{{ budget }}">
     <input type="hidden" name="industry" value="food">
+    <input type="hidden" name="starts" value="{{ crate::media::SHOWCASE_START }}">
+    <input type="hidden" name="ends" value="{{ crate::media::SHOWCASE_END }}">
     <button class="secondary" type="submit">试用合成样例</button>
   </form>
 </div>
@@ -27,10 +30,11 @@
       <div class="media-fields">
       <label>主题行业<input type="text" name="industry" value="食品饮料" readonly></label>
       <label>统一预算量级（万元）<input type="text" name="budget" value="{{ budget }}" readonly></label>
-      <label>投放媒体<input type="text" value="公交+地铁" readonly></label>
+      <label>投放媒体<input type="text" value="公交车身、地铁出入口" readonly></label>
       <input type="hidden" name="bus" value="1">
       <input type="hidden" name="metro" value="1">
       </div>
+      <p>约 {{ budget }} 万元的高位报价参考区间为 {{ crate::media::budget_band_label(budget) }}。</p>
     </fieldset>
     <fieldset class="media-date-range" data-date-range>
       <legend>投放档期</legend>
@@ -71,25 +75,31 @@
     </fieldset>
     <details class="rolling-fields">
       <summary>按月核验与调配</summary>
-      <p>默认 5 月预热、7 月主投、10 月回访，其余月份机动。实际采购逐段核对红豆库存、报价及客户指定线路。</p>
+      <p>策略 Agent 先核对客户目标和档期依据，再按采购段查询红豆库存、报价及必选线路。</p>
       <label>各段调配依据（选填）<textarea name="scheduling_factors" rows="3" maxlength="600" placeholder="2027-07-01 | 3 | 门店暑期体验活动&#10;2027-09-01 | 1 | 已确认的商圈活动"></textarea></label>
-      <p>每行填写月初日期、权重 0–3 和原因。0 代表当月机动，1–3 影响预算分配。缺快照时，仍为该投放段留出预算。</p>
+      <p>每行填写月初日期、权重 0–3 和原因。填写后仅按权重大于 0 的月份发起查询。留空时由策略阶段提出候选档期。</p>
     </details>
     <details class="rolling-fields" data-brief-review>
       <summary>客户假设书与目标圈</summary>
       <p>填写脱敏的客户规模与目标。四项投放条件取自上方表单。</p>
+      <button type="button" class="secondary" data-fill-campaign-case="{{ crate::media::brief::showcase_fields() }}">填入新品试饮假设书</button>
       <input type="hidden" name="brief_used" value="0">
       <div class="media-fields">
-        <label>客户类型与规模<input type="text" name="brief_customer_profile" maxlength="150" placeholder="例如上海某区域饮料连锁，门店规模已核对"></label>
+        <label>客户类型与规模<input type="text" name="brief_customer_profile" maxlength="150" placeholder="例如区域连锁饮品品牌，上海有 12 家门店"></label>
         <label>生意目标<input type="text" name="brief_objective" maxlength="150"></label>
-        <label>Campaign 主目标<select name="brief_campaign_goal"><option value="">沿用示例或按需求确认</option><option value="到店">到店</option><option value="认知">认知</option><option value="促销">促销</option><option value="拉新">拉新</option></select></label>
+        <label>Campaign 主目标<select name="brief_campaign_goal"><option value="">暂未确认</option><option value="到店">到店</option><option value="认知">认知</option><option value="促销">促销</option><option value="拉新">拉新</option></select></label>
+        <label>首要比选指标<select name="brief_comparison_focus"><option value="">跟随主目标</option><option value="core_bus_days">核心圈公交车日</option><option value="estimated_exposure">可核验预估人次</option><option value="coverage">目标圈覆盖</option></select></label>
         <label>目标人群<input type="text" name="brief_audience" maxlength="150"></label>
         <label>意向区域<input type="text" name="brief_region" maxlength="150"></label>
-        <label>成功衡量与监测约定<input type="text" name="brief_monitoring" maxlength="150"></label>
+        <label>成功衡量与监测约定<input type="text" name="brief_monitoring" maxlength="150" placeholder="例如按门店统计去重后的试饮扫码量，核对上刊照片"></label>
       </div>
+      {% call trial_form::inputs("", "", "") %}{% endcall %}
       <label>新云查询中心（每行一个）<textarea name="target_centers" rows="3" maxlength="260" placeholder="上海市静安区南京西路789号&#10;上海市黄浦区新天地"></textarea></label>
+      <label>核心目标圈<input name="core_circle" maxlength="80" list="core-circle-options" aria-describedby="core-circle-help"></label>
+      <datalist id="core-circle-options" data-default-centers="{{ crate::media::FOOD_COVERAGE_CENTERS }}"></datalist>
+      <p class="settings-help" id="core-circle-help">选择本次查询中心之一，留空沿用快照默认目标圈。</p>
       <p>留空沿用默认五个商圈。填写后按 1,500 米半径查询所列地标。</p>
-      <label class="media-confirm"><input type="checkbox" name="brief_confirmed" value="1">已核对客户描述、投放条件和目标圈</label>
+      <label class="media-confirm"><input type="checkbox" name="brief_confirmed" value="1">已核对客户描述、投放条件和目标圈，客户及商务信息已脱敏</label>
     </details>
     <details class="rolling-fields">
       <summary>上下刊施工条件</summary>
@@ -97,7 +107,8 @@
       {% include "media-ops-fields.html" %}
     </details>
     <div class="form-actions">
-      <p>提交后按所选档期从新云和红豆取数。缺少库存的投放阶段会列为待核。</p>
+      <p>新品试饮案按假设书安排 5 月 40 万、7 月 120 万、10 月 40 万。实际报价按平台档期和刊例核算。</p>
+      <p>先核对提案策略，再按候选采购段查询红豆与新云。缺少库存的采购段会列为待核。</p>
       <button type="submit">一键生成提案</button>
     </div>
   </form>

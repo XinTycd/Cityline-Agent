@@ -3,13 +3,100 @@
 <div class="page-heading">
   <div><h1>{{ heading }}</h1><p>{{ task.summary() }}</p></div>
   <div class="action-group">
-    {% if !gaps.is_empty() %}<a class="button" href="/media-proposals/tasks/{{ task.id }}/evidence?download=1" download>下载补证清单 CSV</a>{% endif %}
+    {% if !gaps.is_empty() %}<a class="button" href="/media-proposals/tasks/{{ task.id }}/evidence?scope={{ format.scope_name() }}&amp;download=1&amp;starts={{ format.starts }}&amp;variant={{ format.variant }}&amp;kind={{ format.kind }}" download>下载当前清单 CSV</a>{% endif %}
+    {% if format.publication() %}<a class="button secondary" href="/media-proposals/tasks/{{ task.id }}/evidence">查看内部补证</a>
+    {% else %}<a class="button secondary" href="/media-proposals/tasks/{{ task.id }}/evidence?scope=publication">查看正式报告核验</a>{% endif %}
     <a class="button secondary" href="/media-proposals/tasks/{{ task.id }}">返回任务</a>
   </div>
 </div>
+{% if format.publication() %}
+<section class="panel settings-panel" aria-labelledby="publication-evidence-title">
+  <header class="settings-panel-header"><h2 id="publication-evidence-title">正式报告发布状态</h2></header>
+  {% if task.can_publish_report() %}
+  <p>报告已经开放。</p>
+  <a class="button" href="/media-proposals/tasks/{{ task.id }}/report?delivery=1" download>下载正式报告</a>
+  {% else if task.platform_report_data %}
+  <p>平台数据已齐。库存复核与人工确认可在任务页完成。</p>
+  {% else if total_gaps == 0 %}
+  <p>当前没有逐档期的证据缺项。请在任务页核对客户假设书、报告审核条件和生成版本。</p>
+  {% else %}
+  <p>下列档期和资源仍需平台依据。内部上传的证据可在补证清单查阅。</p>
+  {% if !overview_missing.is_empty() %}<p>方案 {{ overview_missing.join("／") }} 需取得含标准底图的全年线路总图。</p>{% endif %}
+  {% if refresh_inventory %}
+  <form method="post" action="/media-proposals/tasks/{{ task.id }}/rerun" data-workspace-submit>
+    <input type="hidden" name="budget" value="{{ task.budget() }}">
+    <button type="submit">沿用本任务条件重新获取数据</button>
+  </form>
+  {% else if refresh_evidence %}
+  <form method="post" action="/media-proposals/tasks/{{ task.id }}/refresh-evidence" data-workspace-submit>
+    <button type="submit">按采购清单重新取证</button>
+  </form>
+  {% endif %}
+  {% endif %}
+</section>
+{% else if !overview_missing.is_empty() %}
+<section class="panel settings-panel" aria-labelledby="overview-map-evidence">
+  <h2 id="overview-map-evidence">线路总图待取证</h2>
+  <p>方案 {{ overview_missing.join("／") }} 需补新云总图。总图合并本案所有档期的入选公交线路。</p>
+  <form method="post" action="/media-proposals/tasks/{{ task.id }}/refresh-evidence" data-workspace-submit>
+    <button class="secondary" type="submit">按采购清单重新取证</button>
+  </form>
+</section>
+{% endif %}
+{% if total_gaps > 0 %}
+<section class="panel settings-panel" aria-labelledby="evidence-filters">
+  <header class="settings-panel-header"><h2 id="evidence-filters">筛选待补依据</h2></header>
+  <form method="get" action="/media-proposals/tasks/{{ task.id }}/evidence" class="filter-form" role="search" aria-label="筛选补证清单" data-workspace-submit>
+    <input type="hidden" name="scope" value="{{ format.scope_name() }}">
+    <label>投放档期<select name="starts"><option value="">全部档期</option>
+      {% for (starts, ends) in periods %}<option value="{{ starts }}"{% if *starts == format.starts %} selected{% endif %}>{{ starts }} 至 {{ ends }}</option>{% endfor %}
+    </select></label>
+    <label>方案<select name="variant">
+      <option value="">全部方案</option>
+      <option value="A"{% if format.variant == "A" %} selected{% endif %}>方案 A</option>
+      <option value="B"{% if format.variant == "B" %} selected{% endif %}>方案 B</option>
+    </select></label>
+    <label>缺项类型<select name="kind"><option value="">全部类型</option>
+      {% for kind in kinds %}<option value="{{ kind.id() }}"{% if format.kind == kind.id() %} selected{% endif %}>{{ kind.label() }}</option>{% endfor %}
+    </select></label>
+    <div class="action-group"><button type="submit">筛选</button><a class="button secondary" href="/media-proposals/tasks/{{ task.id }}/evidence?scope={{ format.scope_name() }}">重置</a></div>
+  </form>
+  <p>显示 {{ gaps.len() }} 项，共 {{ total_gaps }} 项。A／B 共有的缺项只计一次。</p>
+</section>
+{% endif %}
+{% if !reach_templates.is_empty() %}
+<section class="panel settings-panel" aria-labelledby="reach-template-title">
+  <header class="settings-panel-header"><h2 id="reach-template-title">单位日触达补录模板</h2></header>
+  <p>已预填 A／B 入选资源和缺失月份。填写有新云单位日触达依据的数值及来源，保存后上传到对应档期。未取得数值和来源的行可留空。</p>
+  <div class="action-group">
+    {% for ((starts, ends), batch) in reach_templates %}
+    <div class="action-group">
+      <a class="button secondary" href="/media-proposals/tasks/{{ task.id }}/evidence?reach_template={{ batch }}" download>{{ starts }} 至 {{ ends }}的模板</a>
+      <a href="/media-data?batch={{ batch }}&amp;task={{ task.id }}">上传本档证据</a>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+{% if !exit_templates.is_empty() %}
+<section class="panel settings-panel" aria-labelledby="exit-template-title">
+  <header class="settings-panel-header"><h2 id="exit-template-title">地铁出口坐标补录模板</h2></header>
+  <p>已预填采购清单缺少坐标的点位。填入官方依据中的具体出口坐标及来源，按原档期上传。坐标系为 BD-09，未取到依据的行可以留空。</p>
+  <div class="action-group">
+    {% for ((starts, ends), batch) in exit_templates %}
+    <div class="action-group">
+      <a class="button secondary" href="/media-proposals/tasks/{{ task.id }}/evidence?exit_template={{ batch }}" download>{{ starts }} 至 {{ ends }}的出口模板</a>
+      <a href="/media-data?batch={{ batch }}&amp;task={{ task.id }}">上传本档出口坐标</a>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
 <section class="panel list-panel" aria-label="按锁定采购清单列出待补依据">
-  {% if gaps.is_empty() %}
-  <p class="list-empty">该版本的计划投放阶段没有待补的依据。</p>
+  {% if total_gaps == 0 %}
+  <p class="list-empty">该版本没有逐档期的待补依据。</p>
+  {% else if gaps.is_empty() %}
+  <p class="list-empty">当前筛选条件没有匹配的证据缺项。</p>
   {% else %}
   <div class="task-rail" role="region" tabindex="0" aria-label="待补依据明细">
     <table class="work-table">
@@ -20,15 +107,16 @@
         <tr>
           <td>{{ gap.starts }} 至 {{ gap.ends }}</td>
           <td>{{ variants }}</td>
-          <th scope="row">{{ gap.kind }}</th>
+          <th scope="row">{{ gap.kind.label() }}</th>
           <td>{% if gap.resource.is_empty() %}—{% else %}{{ gap.resource }}{% endif %}{% if !gap.code.is_empty() %}<br>{{ gap.code }}{% endif %}</td>
           <td>{{ gap.needed }}{% if !gap.existing.is_empty() %}<br>{{ gap.existing }}{% endif %}</td>
           <td>
-            {% if gap.kind == "施工条件" %}
+            {% if gap.kind.id() == "operations" %}
             <a href="/media-proposals/tasks/{{ task.id }}?review=operations">复核施工</a>
-            {% else if gap.kind == "库存与组合" %}
+            {% else if gap.kind.id() == "inventory" %}
             {% if let Some(batch) = gap.batch %}<a href="/media-data?batch={{ batch }}&amp;task={{ task.id }}">查看库存快照</a>
-            {% else %}<a href="/media-proposals/tasks/{{ task.id }}">重新取数</a>{% endif %}
+            {% else %}<a href="/media-proposals/tasks/{{ task.id }}">重新获取数据</a>{% endif %}
+            {% else if format.publication() %}在平台取证时核对
             {% else if let Some(batch) = gap.batch %}
             <a href="/media-data?batch={{ batch }}&amp;task={{ task.id }}">补充本档期证据</a>
             {% endif %}

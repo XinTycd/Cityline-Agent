@@ -10,60 +10,108 @@
 {% if tab == "model" %}
 <section class="panel settings-panel" aria-labelledby="agent-model-title">
   <header class="settings-panel-header">
-    <div><h2 id="agent-model-title">模型接入</h2><p>选择提案任务使用的模型来源。</p></div>
-    {% if configured %}<span class="badge" data-tone="success">已配置模型</span>
-    {% else %}<span class="badge" data-tone="neutral">使用本地规则</span>{% endif %}
+    <div><h2 id="agent-model-title">模型接入</h2><p>设置提案策略、媒介组合和报告核验所用的模型。</p></div>
   </header>
-  <form action="/agents/model" method="post" class="settings-form" id="agent-model-form" data-workspace-submit data-agent-model{% if environment_configured %} data-agent-environment-configured{% endif %}>
-    <div class="settings-rows">
-      <div class="settings-field">
-        <label for="agent-model-mode">模型来源</label>
-        <select id="agent-model-mode" name="mode">
-          <option value="environment"{% if mode == "environment" %} selected{% endif %}>使用服务端配置</option>
-          <option value="cloud"{% if mode == "cloud" %} selected{% endif %}>指定云端模型</option>
-          <option value="local"{% if mode == "local" %} selected{% endif %}>指定本地模型</option>
-          <option value="rules"{% if mode == "rules" %} selected{% endif %}>仅使用本地规则</option>
-        </select>
-      </div>
-      <div class="settings-rows" data-agent-model-fields>
+  <form action="/agents/model" method="post" class="settings-form" id="agent-model-form" data-workspace-submit data-agent-model data-inherited-protocol="{{ environment_protocol.id() }}">
+    <fieldset class="settings-choice-group">
+      <legend class="visually-hidden">模型配置方式</legend>
+      <label>
+        <input type="radio" name="scope" value="shared"{% if shared %} checked{% endif %}>
+        <span><strong>统一设置模型</strong><small>所有 Agent 共用一套模型配置。</small></span>
+      </label>
+      <label>
+        <input type="radio" name="scope" value="individual"{% if !shared %} checked{% endif %}>
+        <span><strong>分别配置模型</strong><small>为每个 Agent 选择模型和推理强度。</small></span>
+      </label>
+    </fieldset>
+    {% if let Some(error) = saved_error %}<p class="form-feedback" role="alert" data-tone="error">{{ error }}</p>{% endif %}
+    {% for profile in profiles %}
+    <section class="model-profile" data-model-profile="{% if profile.id == "shared" %}shared{% else %}individual{% endif %}" aria-labelledby="agent-{{ profile.id }}-title"{% if (profile.id == "shared") != shared %} hidden{% endif %}>
+      <header class="settings-panel-header">
+        <h3 id="agent-{{ profile.id }}-title">{{ profile.label }}</h3>
+        <div class="action-group">
+          {% if let Some(result) = profile.connection %}
+            {% if result.passed %}<span class="badge" data-tone="success">连接已验证</span>
+            {% else %}<span class="badge" data-tone="error">连接异常</span>{% endif %}
+          {% else if profile.configured %}
+            <span class="badge" data-tone="neutral">待验证</span>
+          {% endif %}
+          {% if profile.configured %}<button type="submit" class="secondary" form="probe-{{ profile.id }}">测试已保存的连接</button>{% endif %}
+        </div>
+      </header>
+      <div class="settings-rows">
         <div class="settings-field">
-          <label for="agent-model-endpoint">模型接口地址</label>
+          <label for="agent-{{ profile.id }}-source">模型来源</label>
+          <select id="agent-{{ profile.id }}-source" name="{{ profile.id }}_mode" data-model-source>
+            <option value="environment"{% if profile.mode == "environment" %} selected{% endif %}>服务端配置</option>
+            <option value="cloud"{% if profile.mode == "cloud" %} selected{% endif %}>云端 API</option>
+            <option value="local"{% if profile.mode == "local" %} selected{% endif %}>本地模型</option>
+          </select>
+        </div>
+        <div class="settings-field">
+          <label for="agent-{{ profile.id }}-protocol">API 调用协议</label>
+          <select id="agent-{{ profile.id }}-protocol" name="{{ profile.id }}_protocol" data-model-protocol="{{ profile.custom_protocol.id() }}">
+            {% for protocol in protocols %}
+              <option value="{{ protocol.id() }}" data-path="/v1{{ protocol.path() }}"{% if profile.protocol == *protocol %} selected{% endif %}>{{ protocol.label() }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="settings-field">
+          <label for="agent-{{ profile.id }}-effort">模型强度</label>
           <div class="settings-control">
-            <input id="agent-model-endpoint" type="url" name="endpoint" value="{{ endpoint }}" placeholder="https://model.example.invalid/" maxlength="500" aria-describedby="agent-model-endpoint-help">
-            <small id="agent-model-endpoint-help">填写 Chat Completions 接口。云端接口使用 HTTPS，本地模型使用回环地址。</small>
+            <select id="agent-{{ profile.id }}-effort" name="{{ profile.id }}_effort" aria-describedby="agent-{{ profile.id }}-effort-help">
+              {% for effort in efforts %}
+                <option value="{{ effort.id() }}"{% if profile.effort == *effort %} selected{% endif %}>{{ effort.label() }}</option>
+              {% endfor %}
+            </select>
+            <small id="agent-{{ profile.id }}-effort-help">低、中、高用于调节推理强度。请根据模型支持的档位选择。</small>
           </div>
         </div>
-        <div class="settings-field">
-          <label for="agent-model-name">模型名称</label>
-          <input id="agent-model-name" type="text" name="name" value="{{ name }}" maxlength="128">
+        <div class="settings-rows" data-model-custom{% if profile.mode == "environment" %} hidden{% endif %}>
+          <div class="settings-field">
+            <label for="agent-{{ profile.id }}-endpoint">模型接口地址</label>
+            <div class="settings-control">
+              <input id="agent-{{ profile.id }}-endpoint" type="url" name="{{ profile.id }}_endpoint" value="{{ profile.endpoint }}" maxlength="500" data-model-endpoint aria-describedby="agent-{{ profile.id }}-endpoint-help">
+              <small id="agent-{{ profile.id }}-endpoint-help">填写完整接口地址。云端 API 使用 HTTPS，本地模型使用回环地址。</small>
+            </div>
+          </div>
+          <div class="settings-field">
+            <label for="agent-{{ profile.id }}-name">模型名称</label>
+            <input id="agent-{{ profile.id }}-name" type="text" name="{{ profile.id }}_name" value="{{ profile.name }}" maxlength="128">
+          </div>
         </div>
-      </div>
-      {% if can_save_key %}
-      <div class="settings-field" data-agent-key-field>
-        <label for="agent-model-key">API Key</label>
-        <div class="settings-control">
-          <input id="agent-model-key" type="password" name="api_key" autocomplete="new-password" spellcheck="false" maxlength="1024" aria-describedby="agent-model-key-help">
-          <small id="agent-model-key-help">{% if key_saved %}当前配置已保存密钥。{% endif %}同一接口地址留空时沿用现有密钥。本地模型可按需填写。</small>
+        <div class="settings-rows" data-model-inherited{% if profile.mode != "environment" %} hidden{% endif %}>
+          {% if !environment_name.is_empty() %}
+          <div class="settings-field"><label for="agent-{{ profile.id }}-server-endpoint">模型接口地址</label><input id="agent-{{ profile.id }}-server-endpoint" value="{{ environment_endpoint }}" readonly></div>
+          <div class="settings-field"><label for="agent-{{ profile.id }}-server-name">模型名称</label><input id="agent-{{ profile.id }}-server-name" value="{{ environment_name }}" readonly></div>
+          {% else if environment_error.is_none() %}
+          <p class="settings-help">服务端尚未配置模型。此阶段将使用本地规则。</p>
+          {% endif %}
         </div>
+        {% if can_save_key %}
+        <div class="settings-field" data-agent-key-field{% if profile.mode == "environment" && environment_name.is_empty() %} hidden{% endif %}>
+          <label for="agent-{{ profile.id }}-key">API Key</label>
+          <div class="settings-control">
+            <input id="agent-{{ profile.id }}-key" type="password" name="{{ profile.id }}_api_key" autocomplete="new-password" spellcheck="false" maxlength="1024" aria-describedby="agent-{{ profile.id }}-key-help">
+            <small id="agent-{{ profile.id }}-key-help">{% if profile.key_saved %}已保存 API Key。{% endif %}接口地址相同时，留空会沿用现有密钥。本地模型可按需填写。</small>
+          </div>
+        </div>
+        {% endif %}
       </div>
+      {% if let Some(error) = profile.error %}<p class="form-feedback" role="alert" data-tone="error">{{ error }} 此配置对应的阶段将使用本地规则。<a href="/audit?category=Agent&amp;q=配置降级">查看降级记录</a></p>{% endif %}
+      {% if let Some(result) = profile.connection %}
+        <p class="form-feedback" role="status" data-tone="{% if result.passed %}success{% else %}error{% endif %}">{{ result.source }} · {{ result.detail }}{% if !result.passed %} <a href="/audit?category=Agent">查看 Agent 日志</a>{% endif %}</p>
       {% endif %}
-      <p class="settings-help" data-agent-environment-note hidden>{% if environment_configured %}保存后将使用服务端配置的接口与模型。{% else %}服务端尚未配置模型，提案将使用本地规则。{% endif %}</p>
-    </div>
-    {% if key_unreadable %}<p class="form-feedback" role="alert" data-tone="error">无法读取已保存的 API Key，请重新填写。</p>{% endif %}
+    </section>
+    {% endfor %}
     {% if saved %}<p class="form-feedback" role="status" data-tone="success">模型配置已保存。</p>{% endif %}
+    <div class="form-actions"><button type="submit">保存模型配置</button></div>
   </form>
-  {% if let Some(passed) = probe %}
-    {% if passed %}<p class="form-feedback" role="status" data-tone="success">模型连接成功，返回结果已通过格式校验。</p>
-    {% else %}<p class="form-feedback" role="status" data-tone="error">模型连接测试未通过。<a href="/audit?category=Agent&amp;q=连接测试">查看测试日志</a></p>{% endif %}
-  {% endif %}
-  <div class="form-actions">
-    {% if configured %}
-    <form action="/agents/probe" method="post" data-workspace-submit aria-label="测试已保存的模型配置">
-      <button type="submit" class="secondary">测试连接</button>
-    </form>
+  {% for profile in profiles %}
+    {% if profile.configured %}
+    <form id="probe-{{ profile.id }}" action="/agents/probe{% if profile.id != "shared" %}?role={{ profile.id }}{% endif %}" method="post" data-workspace-submit></form>
     {% endif %}
-    <button type="submit" form="agent-model-form">保存模型配置</button>
-  </div>
+  {% endfor %}
 </section>
 {% else %}
 <section class="panel settings-panel" aria-labelledby="agent-collaboration-title">

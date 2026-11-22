@@ -4,30 +4,6 @@
   <div><h1>{{ heading }}</h1><p>查看提案生成与人工确认的进展。</p></div>
   <a class="button" href="/media-proposals">新建提案</a>
 </div>
-<dl class="media-stats overview-stats">
-  <div><dt>任务总数</dt><dd>{{ total }}</dd></div>
-  <div><dt>进行中</dt><dd>{{ active_count }}</dd></div>
-  <div><dt>待人工确认</dt><dd>{{ ready_count }}</dd></div>
-  <div><dt>已确认</dt><dd>{{ approved_count }}</dd></div>
-</dl>
-<section class="panel list-panel" aria-labelledby="active-tasks">
-  <div class="result-header section-toolbar"><h2 id="active-tasks">进行中</h2><a href="/task-log?filter=active">查看全部</a></div>
-  {% if active.is_empty() %}
-  <p class="list-empty">当前没有运行中的任务。</p>
-  {% else %}
-  {% let tasks = active %}
-  {% let task_table_label = "进行中的任务列表" %}
-  {% include "task-table.html" %}
-  {% endif %}
-</section>
-<section class="panel list-panel" aria-labelledby="ready-tasks">
-  <div class="result-header section-toolbar"><h2 id="ready-tasks">已完成待人工确认</h2><a href="/task-log?filter=pending">查看全部</a></div>
-  {% if ready.is_empty() %}
-  <p class="list-empty">当前没有待确认的提案。</p>
-  {% else %}
-  {% let tasks = ready %}
-  {% let task_table_label = "待人工确认的任务列表" %}
-  {% include "task-table.html" %}
-  {% endif %}
-</section>
+<p class="form-feedback" data-overview-warning role="status" hidden>暂时无法更新任务状态，正在重连。</p>
+{{ queues|safe }}
 {% endblock %}

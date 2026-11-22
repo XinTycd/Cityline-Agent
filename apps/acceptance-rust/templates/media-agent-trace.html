@@ -1,0 +1,52 @@
+{% extends "shell.html" %}
+{% block content %}
+<div class="page-heading">
+  <div><h1>{{ heading }}</h1><p>{{ task.summary() }}</p></div>
+  <a class="button secondary" href="/media-proposals/tasks/{{ task.id }}">返回任务详情</a>
+</div>
+{% if task.can_retry_agents() %}
+<section class="panel settings-panel" aria-labelledby="agent-recovery">
+  <h2 id="agent-recovery">复跑 Agent</h2>
+  <p>连接恢复后，可用原需求、预算和库存重新运行协作。工作台会生成新版本，保留原报告及审核记录。</p>
+  <div class="action-group">
+    {% if is_admin %}<a class="button secondary" href="/agents">打开 Agent 配置</a>{% endif %}
+    {% if model_configured %}
+    <form action="/media-proposals/tasks/{{ task.id }}/retry-agents" method="post" data-workspace-submit>
+      <button type="submit">用当前模型复跑</button>
+    </form>
+    {% else %}<p>请管理员先配置可用的模型。</p>{% endif %}
+  </div>
+</section>
+{% endif %}
+{% for role in roles %}
+<section class="panel settings-panel" aria-labelledby="agent-role-{{ loop.index }}">
+  <div class="section-toolbar result-header">
+    <h2 id="agent-role-{{ loop.index }}">{{ role.title }}</h2>
+    <span class="badge">{{ role.status }}</span>
+  </div>
+  {% if let Some(calls) = role.calls %}<p class="report-caption">{{ calls }}</p>{% endif %}
+  {% if let Some(note) = role.decision_note %}<p class="report-caption">{{ note }}</p>{% endif %}
+  {% if let Some(previous) = role.previous %}
+  <p><a href="/media-proposals/tasks/{{ previous }}/agent-trace">查看原版本协作记录</a></p>
+  {% endif %}
+  <div class="media-fields">
+    <div>
+      <h3>收到的依据</h3>
+      {% if role.inputs.is_empty() %}<p>本版本暂无输入记录。</p>{% endif %}
+      <dl class="report-guidance">{% for field in role.inputs %}<div><dt>{{ field.label }}</dt><dd>{{ field.value }}</dd></div>{% endfor %}</dl>
+    </div>
+    <div>
+      <h3>模型建议</h3>
+      {% if role.proposed.is_empty() %}<p>本版本暂无结构化模型建议。</p>{% endif %}
+      <dl class="report-guidance">{% for field in role.proposed %}<div><dt>{{ field.label }}</dt><dd>{{ field.value }}</dd></div>{% endfor %}</dl>
+    </div>
+    <div>
+      <h3>工作台采用</h3>
+      {% if role.adopted.is_empty() %}<p>本版本暂无采用记录。</p>
+      {% else %}<p class="report-caption">决策来源 · {{ role.source }}</p>{% endif %}
+      <dl class="report-guidance">{% for field in role.adopted %}<div><dt>{{ field.label }}</dt><dd>{{ field.value }}</dd></div>{% endfor %}</dl>
+    </div>
+  </div>
+</section>
+{% endfor %}
+{% endblock %}
