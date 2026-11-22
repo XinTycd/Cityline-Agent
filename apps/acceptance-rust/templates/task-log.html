@@ -6,7 +6,7 @@
     <input type="hidden" name="page_size" value="{{ pages.size }}">
     <label>任务状态<select name="filter">
       <option value="all"{% if filter == "all" %} selected{% endif %}>全部任务</option>
-      <option value="approved"{% if filter == "approved" %} selected{% endif %}>已完成</option>
+      <option value="completed"{% if filter == "completed" %} selected{% endif %}>已完成</option>
       <option value="active"{% if filter == "active" %} selected{% endif %}>任务中</option>
       <option value="pending"{% if filter == "pending" %} selected{% endif %}>待审核</option>
       <option value="failed"{% if filter == "failed" %} selected{% endif %}>失败</option>

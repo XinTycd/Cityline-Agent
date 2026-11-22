@@ -75,7 +75,7 @@
       const agentTraceLink = scope.querySelector('[data-agent-trace-link]');
       const scheduleRevisionLink = scope.querySelector('[data-schedule-revision-link]');
       const blocked = delivery.querySelector('[data-task-blocked]');
-      const publicationChecklist = blocked.querySelector('[data-publication-checklist]');
+      const publicationChecklist = delivery.querySelector('[data-publication-checklist]');
       const reportLinks = delivery.querySelector('[data-task-report-links]');
       const formalDelivery = reportLinks.querySelector('[data-formal-delivery]');
       const platformOutcome = delivery.querySelector('[data-platform-outcome]');
@@ -139,7 +139,6 @@
           currentStep = progress.current_step;
           if (followProgress) steps[currentStep].choice.checked = true;
           if (progress.state !== 'active') {
-            taskProgress.removeAttribute('data-active');
             ready.hidden = !progress.offer_report;
             if (review) review.hidden = !progress.offer_review;
             if (budgetConfirmation) budgetConfirmation.hidden = !progress.budget_confirmation_required;
@@ -148,7 +147,7 @@
               generationTime.hidden = false;
             }
             blocked.hidden = progress.offer_report;
-            publicationChecklist.hidden = !progress.offer_proof_refresh;
+            if (publicationChecklist) publicationChecklist.hidden = !progress.offer_proof_refresh;
             reportLinks.hidden = !progress.offer_report;
             if (formalDelivery) formalDelivery.hidden = !progress.offer_formal_delivery;
             platformOutcome.hidden = !progress.platform_interrupted;
@@ -176,6 +175,7 @@
               recoverySnapshots.hidden = false;
             }
             delivery.hidden = false;
+            taskProgress.removeAttribute('data-active');
             return;
           }
         } catch {

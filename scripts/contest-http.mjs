@@ -264,10 +264,22 @@ function inventoryCsv(rows, media) {
 
 export function redClient(token, tenant = '1') {
   if (!/^[A-Za-z0-9._~-]{6,4096}$/u.test(token) || !/^\d{1,12}$/u.test(tenant)) throw new Error('Missing Redbean session');
-  const read = (key, query, excel = false) => request(redOrigin, redPath('API_PREFIX') + redPath(key), {
-    headers: { Authorization: 'Bearer ' + token, 'tenant-id': tenant },
-    referer: redPath('LOGIN'), query: { pageNo: 1, pageSize: 10, ...query }, excel,
-  });
+  const read = async (key, query, excel = false) => {
+    const path = redPath('API_PREFIX') + redPath(key);
+    const options = {
+      headers: { Authorization: 'Bearer ' + token, 'tenant-id': tenant },
+      referer: redPath('LOGIN'), query: { pageNo: 1, pageSize: 10, ...query }, excel,
+    };
+    try {
+      return await request(redOrigin, path, options);
+    } catch (error) {
+      const temporary = error instanceof TypeError || error.name === 'TimeoutError'
+        || [408, 500, 502, 503, 504].includes(error.status);
+      if (!temporary) throw error;
+      await new Promise(resolve => setTimeout(resolve, 350));
+      return request(redOrigin, path, options);
+    }
+  };
   let levelDictionary;
   async function loadLevels() {
     let entries;

@@ -339,7 +339,7 @@ details li p { margin-top: 3px; }
 .audit-record pre { max-height: 26rem; overflow: auto; margin: 8px 0 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--control-radius); background: var(--rail); color: var(--text); font-size: .83rem; white-space: pre-wrap; overflow-wrap: anywhere; }
 .work-table th, .work-table td { padding: 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
 .work-table th { color: var(--muted); }
-[data-task-delivery][hidden], [data-task-ready][hidden], [data-task-blocked][hidden], [data-task-review][hidden], [data-budget-confirmation][hidden], [data-route-replacement][hidden] { display: none; }
+[data-task-delivery][hidden], [data-task-delivery] [hidden] { display: none; }
 [data-auth-fields][hidden], [data-auth-provider][hidden], [data-model-profile][hidden], [data-model-custom][hidden], [data-model-inherited][hidden], [data-agent-key-field][hidden] { display: none; }
 .report-guidance { display: grid; gap: 10px; margin: 0; }
 .report-guidance div { padding-inline-start: 10px; border-inline-start: 2px solid var(--accent-line); }

@@ -402,6 +402,13 @@ assert.equal(evidenceState.steps[4].state, 'done');
 assert.equal(evidenceState.offer_report, true);
 assert.equal(evidenceState.offer_formal_delivery, false);
 assert.equal(evidenceState.offer_local_snapshot, true);
+const completedEvidenceId = evidenceDraftPath.split('/').at(-1);
+for (const filter of ['all', 'completed', 'approved']) {
+  const list = await (await page('/task-log?filter=' + filter + '&q=' + completedEvidenceId)).text();
+  assert.ok(list.includes('href="' + evidenceDraftPath + '"'), filter);
+}
+const demoCompletedList = await (await page('/task-log?filter=completed&q=' + demoTaskPath.split('/').at(-1))).text();
+assert.ok(!demoCompletedList.includes('href="' + demoTaskPath + '"'));
 const allTasks = await (await page('/task-log')).text();
 assert.match(allTasks, /<option value="exceptions">异常任务<\/option>/u);
 const scopedExceptions = await (await page('/task-log?filter=exceptions&q=' + evidenceDraftPath.split('/').at(-1))).text();

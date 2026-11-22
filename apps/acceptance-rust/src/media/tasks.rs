@@ -2190,7 +2190,8 @@ enum TaskFilter {
     All,
     Active,
     Pending,
-    Approved,
+    #[serde(alias = "approved")]
+    Completed,
     Failed,
 }
 
@@ -2201,7 +2202,7 @@ impl TaskFilter {
             Self::All => "all",
             Self::Active => "active",
             Self::Pending => "pending",
-            Self::Approved => "approved",
+            Self::Completed => "completed",
             Self::Failed => "failed",
         }
     }
@@ -2294,7 +2295,7 @@ async fn listing(
                  WHEN 'all' THEN 1
                  WHEN 'active' THEN active=1
                  WHEN 'pending' THEN awaiting_confirmation
-                 WHEN 'approved' THEN state='done' AND NOT missing_report AND review='approved'
+                 WHEN 'completed' THEN active=0 AND report_saved AND NOT is_demo
                  WHEN 'failed' THEN active=0 AND state IN ('active','failed')
                  ELSE has_exception
                END
