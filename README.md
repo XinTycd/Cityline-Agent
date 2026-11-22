@@ -1,129 +1,100 @@
 <div align="center">
-  <img src="./apps/acceptance-rust/assets/cityline.svg" width="88" height="88" alt="城线标志" />
-  <h1>城线户外媒体提案工作台</h1>
-  <p>从客户简报到可核验的公交与地铁投放提案。</p>
+  <img src="./apps/acceptance-rust/assets/cityline.svg" width="80" height="80" alt="城线 Logo" />
+  <h1>城线 · 户外媒体 Agent 提案工作台</h1>
+  <p>从客户 Brief 到可核验、可交付的公交车身与地铁出入口广告提案。</p>
   <p>
-    <a href="#快速开始"><img src="https://img.shields.io/badge/部署方式-本机运行-2859d9" alt="本机运行" /></a>
-    <a href="#管理工作台"><img src="https://img.shields.io/badge/工作方式-三智能体协作-347d73" alt="三智能体协作" /></a>
-    <a href="#数据存储"><img src="https://img.shields.io/badge/数据存储-本地数据库-334e68" alt="本地数据库" /></a>
-    <a href="./LICENSE"><img src="https://img.shields.io/badge/开源许可-阿帕奇二点零-2859d9" alt="阿帕奇二点零许可" /></a>
+    <a href="https://github.com/XinTycd/Cityline-Agent/actions/workflows/ci.yml"><img src="https://github.com/XinTycd/Cityline-Agent/actions/workflows/ci.yml/badge.svg?branch=main" alt="GitHub Actions CI 状态" /></a>
+    <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Rust-Edition_2024-CE412B?logo=rust&amp;logoColor=white" alt="Rust Edition 2024" /></a>
+    <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/Node.js-24%2B-417E38?logo=node.js&amp;logoColor=white" alt="Node.js 24+" /></a>
+    <a href="https://www.sqlite.org/"><img src="https://img.shields.io/badge/Database-SQLite-003B57?logo=sqlite&amp;logoColor=white" alt="SQLite" /></a>
+    <a href="./LICENSE"><img src="https://img.shields.io/badge/License-Apache--2.0-4C78A8" alt="Apache-2.0" /></a>
   </p>
-  <p><a href="#查看投放提案">提案预览</a> · <a href="#快速开始">快速开始</a> · <a href="#文档">文档</a></p>
+  <p><a href="#快速开始">快速开始</a> · <a href="#演示流程">演示流程</a> · <a href="#agent-工作流">Agent 工作流</a> · <a href="#配置">配置</a></p>
 </div>
 
-## 项目背景
+## 项目简介
 
-户外媒体团队收到客户简报后，要筛选目标商圈、核对档期库存、逐项询价，再把线路图、排期和报价放进同一份提案。客户改变预算或增加必选线路时，这些工作容易重复。城线把需求确认、选点、库存和刊例核算、补证及人工确认放在同一工作台。
+户外媒体团队收到客户 Brief 后，往往要跨平台查商圈覆盖、核对档期库存和刊例，再手工整理选址、排期与报价。预算或必选线路一变，采购组合要重新核算，原来的选址依据也容易散落在不同文件里。
 
-当前演示聚焦上海食品饮料行业。客户画像与活动为脱敏假设，正式展示为二百万元预算量级、二〇二七年全年、公交车身与地铁出入口。方案甲重在拓宽商圈覆盖，方案乙重在提高核心门店附近的投放密度。两案使用相同的客户约束、档期和库存，可按一百、二百、五百万元预算重新核算。
+城线把需求确认、新云覆盖查询、红豆库存核验、媒介组合求解与人工审核串成同一条流程。每套提案都包含采购清单、线路图、刊例依据与待核事项，可在工作台预览，也可导出为独立 HTML。
 
-## 查看投放提案
+![城线提案工作台](./docs/images/提案工作台.png)
 
-### 在工作台预览
+## 演示流程
 
-新建任务后确认客户简报、目标区域、媒体和档期。按页面提示认证新云和红豆平台，工作台会自动查询。也可以试用合成样例，或在数据中心导入有权使用的同档期数据。
+1. 在「提案任务」粘贴脱敏的食品饮料品牌 Brief，确认目标商圈、必选线路、2027 年全年档期及约 200 万元预算。首次体验可直接选择「试用合成样例」。
+2. 在任务详情查看取数、组合核算及报告核验进度。授权环境中，按提示登录新云和红豆后继续取数。
+3. 打开报告对比 A/B。**A 案扩大商圈覆盖，B 案聚焦核心门店周边。** 两案按同一预算量级、档期和库存计算，可展开线路图、采购数量、刊例及施工核验。
+4. 在已锁定数据的任务中，以 100 万元和 500 万元分别重算，查看公交车辆和地铁点位增减、替换以及费用变化。
+5. 下载独立 HTML 报告。图表、样式和交互随文件保存，断网后仍可切换方案、查看线路图及采购明细。完成证据核验与人工审核后可导出已确认方案。
 
-进入任务详情，打开报告预览，切换两案对比或单案查看。按档期展开线路图、采购清单、报价依据和施工核验。已保存的预算版本可以重新计算，并对照上版的资源和费用差异。
+![A/B 投放提案对比合成样例](./docs/images/投放提案对比.png)
 
-### 下载独立网页
+## Agent 工作流
 
-从任务详情保存独立网页，下载后用浏览器打开即可。原图、样式及交互随文件保存，断网时仍可切换提案、缩放地图和查看采购明细。格式预览使用合成样例。
+| 阶段 | 工作内容 |
+| --- | --- |
+| 需求确认与取数 | 从 4A Brief 提取目标、媒体、档期及必选线路。人工确认后，查询经授权的新云覆盖和红豆库存。 |
+| 需求策略 Agent | 根据已确认的客户目标，判断到访引导、通勤覆盖或品牌认知的策略方向。 |
+| 媒介组合 Agent | 根据策略给出资源组合的核算优先级。Rust 依据库存、刊例和必选线路计算 A/B 采购清单、排期与报价。 |
+| 报告核验 Agent | 基于实际方案比较及证据提出推荐和复核顺序。系统标注缺失的触达、点位坐标或施工条件，最终方案由人工确认。 |
 
-![合成样例的投放提案对比](./docs/images/投放提案对比.png)
+云端模型接收脱敏的结构化摘要。Brief 原文、库存原表和报价明细留在部署环境。模型不可用或输出未通过校验时，系统按本地规则继续处理，并记录日志。详见 [Agent 协作规范](./Agent协作规范.md)。
 
 ## 快速开始
 
-安装支持二〇二四版语言标准的[编译工具链](https://rust-lang.org/tools/install/)、本机原生编译工具、二十四版或以上的[脚本运行环境](https://nodejs.org/)及微软浏览器。脚本依赖与浏览器用于平台认证和官方线路图取证。
+准备支持 Rust Edition 2024 的 [Rust 工具链](https://rust-lang.org/tools/install/)、系统 C 编译工具和 [Node.js 24+](https://nodejs.org/)。正式平台取数使用 Microsoft Edge 与 Playwright Core。
 
-```powershell
+~~~powershell
 git clone https://github.com/XinTycd/Cityline-Agent.git
 cd Cityline-Agent
 npm ci --ignore-scripts
 cargo run --locked --manifest-path apps/acceptance-rust/Cargo.toml
-```
+~~~
 
-打开[本机工作台](http://127.0.0.1:3412/)并选择「试用合成样例」。正式出案前，按[配置](#配置)准备刊例文件、平台授权及模型连接。已有本机构建和加密配置时，可以运行项目的启动脚本。
+打开 [本机工作台](http://127.0.0.1:3412/) →「试用合成样例」。合成样例无需配置新云、红豆或模型 API Key。
 
-```powershell
+Windows 下可通过项目的 PowerShell 脚本读取本机配置并启动已构建的服务。
+
+~~~powershell
+Copy-Item .env.example .env.local
+cargo build --locked --manifest-path apps/acceptance-rust/Cargo.toml
 .\scripts\start-cityline.ps1 -Executable .\apps\acceptance-rust\target\debug\hackson-acceptance.exe
-```
-
-## 管理工作台
-
-![城线提案工作台](./docs/images/提案工作台.png)
-
-| 栏目 | 用途 |
-| --- | --- |
-| 数据总览 | 查看任务总量、进行中、待人工确认和已确认的任务。 |
-| 提案任务 | 导入或粘贴客户简报，确认投放条件，创建任务并跳转进度详情。 |
-| 任务明细 | 筛选、检索和复核任务。支持预算重算、按锁定采购清单重新取证和人工确认。 |
-| 数据中心 | 查看平台与本地快照，导入同档期库存、覆盖、刊例、线路图和触达依据。 |
-| 智能体配置 | 联接云端或本地模型，测试模型接口，配置三角色协作或者规则模式。 |
-| 日志审计 | 查询任务变化、智能体调用、人工确认、平台认证和服务记录。 |
-| 系统设置 | 管理站点名称、简介、标志、登录方式和认证超时。 |
-
-需求策略智能体判断客户目标，媒介组合智能体给出组合优先级，报告核验智能体整理真实缺项和复核顺序。系统按实际库存和刊例核算数量、档期与金额。模型连接异常时继续执行本地规则，任务详情记录所用策略和回退原因。
-
-按采购清单重新取证时只验证新云授权。平台返回的历史人流作为参考。单位日触达、出口实点、施工窗口及产能有缺项时，任务详情会列出待核依据，可从对应快照补证并生成复核版本。
+~~~
 
 ## 配置
 
-进程环境变量的完整字段见[配置示例](./.env.example)。正式使用时，配置相关文件和凭据放在部署环境。
-
-```powershell
-Copy-Item .env.example .env.local
-```
-
-在本机编辑 `.env.local`，将新云和红豆的实际服务地址填写到 `CITYLINE_NEWCLOUD_ORIGIN` 和 `CITYLINE_REDBEAN_ORIGIN`。地址只填加密协议、主机与端口，接口路径按各平台的授权资料逐项配置。通过启动脚本读取此文件。已在部署进程中设置的环境变量优先。
+正式出案使用部署环境的凭据、平台授权与刊例文件。变量见 [.env.example](./.env.example)。
 
 | 配置项 | 说明 |
 | --- | --- |
-| 服务端口与数据库 | 默认运行在本机三四一二端口。可通过 `ACCEPTANCE_RUST_PORT` 与 `ACCEPTANCE_RUST_DATA` 修改。 |
-| 媒体刊例 | 用 `CITYLINE_CONTEST_TARIFF` 指向授权的刊例表。视所选档期查询红豆可售库存，并用新云覆盖结果选点。 |
-| 红豆库存授权 | 使用服务端配置的官方客户端，在系统设置中为本次操作授权。未取得有效库存权限时，按系统提示在官方页面认证。 |
-| 新云授权 | 使用独立的官方登录窗口。认证完成后自动查询覆盖、轨迹和统计，并按所选组合截取官方地图。 |
-| 模型 | 可以在工作台配置模型或使用启动环境配置。云端模型只接收脱敏结构化摘要，简报原文、库存、报价和凭据留在本机。 |
-| 企业登录 | 支持本地管理员、开放身份连接及飞书登录。外部身份提供方需要配置回调、授权范围、服务端凭据和超时。 |
+| 服务和 SQLite | 默认监听 `127.0.0.1:3412`，数据写入 `.operations-data/cityline.sqlite`。可用 `ACCEPTANCE_RUST_PORT` 和 `ACCEPTANCE_RUST_DATA` 覆盖。 |
+| 媒体刊例 | 将 `CITYLINE_CONTEST_TARIFF` 指向有权使用的 Excel 刊例表。 |
+| 新云和红豆 | 在 `.env.local` 配置 `CITYLINE_NEWCLOUD_ORIGIN`、`CITYLINE_REDBEAN_ORIGIN` 及授权资料中的接口路径。新云用于核对覆盖、线路图和触达，红豆用于核对档期库存与点位规格。 |
+| 模型接入 | 在「Agent 配置 → 模型接入」选择服务端配置、云端模型、本地模型或本地规则，可测试 Chat Completions 接口。Windows 上可从界面保存 API Key，也可通过环境变量注入。 |
+| 登录与授权 | 「系统设置」支持本地管理员登录、OIDC 和飞书登录，也可独立管理红豆库存授权。外部登录需配置 HTTPS 站点地址、回调和允许登录的用户。 |
 
-企业部署可设置 `CITYLINE_PUBLIC_ORIGIN` 为实际的加密站点地址。反向代理与工作台部署在同机，工作台仅监听本机。注册外部登录回调前先在本机开启登录并保留本地管理员入口。
+任务、审计、配置、快照及报告版本存放在 SQLite。预算重算沿用同一批库存和刊例，补证保留原报告并生成复核版本，便于追溯数据来源和方案差异。
 
-## 数据存储
+## 开发与 CI
 
-| 位置 | 内容 | 用途 |
-| --- | --- | --- |
-| 本地数据库 | 任务、审计、配置、数据快照、报告版本 | 默认位于 `.operations-data/cityline.sqlite`。 |
-| 本机取数目录 | 经授权取得的原表、接口响应、线路图及取证记录 | 对应取数批次，便于核对来源。 |
-| 浏览器 | 界面偏好和登录会话 | 仅用于当前工作台。 |
-| 独立网页 | 所选方案、可交互线路图和报价明细 | 随文件分享；缺项会保留待核状态。 |
-
-预算重算以同一套已锁定的库存、刊例与业务条件为基础。补证保留原任务并创建新证据版本，可追溯所用的采购清单和数据来源。
-
-## 开发
-
-```powershell
+~~~powershell
 cargo fmt --check --manifest-path apps/acceptance-rust/Cargo.toml
-cargo test --locked --manifest-path apps/acceptance-rust/Cargo.toml
 cargo clippy --locked --manifest-path apps/acceptance-rust/Cargo.toml --all-targets -- -D warnings
-```
+cargo test --locked --manifest-path apps/acceptance-rust/Cargo.toml
+~~~
 
-接口回归脚本会创建和修改任务。另开一个工作台进程，使用独立数据库和端口，清除该进程的刊例路径配置，再将端口传给验证脚本。
+[GitHub Actions](https://github.com/XinTycd/Cityline-Agent/actions/workflows/ci.yml) 检查 Rust 格式、Clippy、单元测试和媒体提案接口回归。接口回归通过临时 SQLite 数据库运行，使用合成及测试数据，无需平台或模型凭据。
 
-```powershell
-$env:ACCEPTANCE_RUST_PORT = '3484'
-node scripts/verify-media-proposals.mjs
-```
-
-## 文档
+## 项目文档
 
 - [项目需求与联调记录](./PRD.md)
-- [三智能体协作规范](./Agent协作规范.md)
-- [智能体提示词和数据交接](./Agent现状与提示词.md)
+- [Agent 协作规范](./Agent协作规范.md)
+- [Agent 提示词与数据交接](./Agent现状与提示词.md)
 - [演示与交付说明](./参赛一页纸.md)
 
-## 贡献
+欢迎通过 [GitHub Issues](https://github.com/XinTycd/Cityline-Agent/issues) 反馈。提交复现步骤时请使用合成或脱敏数据。
 
-欢迎在[问题区](https://github.com/XinTycd/Cityline-Agent/issues)反馈。报告问题时请附上复现步骤、预期结果与实际结果，使用合成或脱敏数据。
+## License
 
-## 许可
-
-项目采用[阿帕奇二点零许可](./LICENSE)。第三方依赖沿用各自许可，企业数据与平台地图按其授权范围使用。
+源代码采用 [Apache License 2.0](./LICENSE)。第三方依赖沿用各自许可，企业数据与平台地图按其授权范围使用。
